@@ -1,0 +1,30 @@
+const { DataTypes } = require('sequelize');
+const sequelize = require('../config/database');
+
+const CheckIn = sequelize.define('CheckIn', {
+    date: {
+        type: DataTypes.DATEONLY,
+        allowNull: false
+    },
+    time: {
+        type: DataTypes.TIME,
+        allowNull: false
+    },
+    checkOutTime: {
+        type: DataTypes.TIME,
+        allowNull: true
+    },
+    status: {
+        type: DataTypes.ENUM('PRESENT', 'LATE', 'ABSENT'),
+        defaultValue: 'PRESENT'
+    },
+    internshipId: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    }
+}, {
+    tableName: 'check_ins',
+    timestamps: true
+});
+
+module.exports = CheckIn;

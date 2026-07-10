@@ -1,0 +1,35 @@
+const express = require('express');
+const router = express.Router();
+const { verifyToken } = require('../middlewares/auth');
+const notificationService = require('../services/notification');
+
+router.use(verifyToken);
+
+router.get('/', async (req, res) => {
+  try {
+    const items = await notificationService.getNotificationsForUser(req.user.id, { limit: 100 });
+    res.json({ success: true, data: items });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/unreadCount', async (req, res) => {
+  try {
+    const count = await notificationService.getUnreadCount(req.user.id);
+    res.json({ success: true, data: { count } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/:id/read', async (req, res) => {
+  try {
+    const n = await notificationService.markAsRead(req.params.id, req.user.id);
+    res.json({ success: true, data: n });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+module.exports = router;

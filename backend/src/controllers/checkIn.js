@@ -1,0 +1,32 @@
+const checkInService = require('../services/checkIn');
+
+const submitCheckIn = async (req, res) => {
+    try {
+        const payload = { ...req.body, userId: req.user.id };
+        const checkin = await checkInService.createCheckIn(payload);
+        res.status(201).json({ success: true, data: checkin });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+const submitCheckOut = async (req, res) => {
+    try {
+        const payload = { ...req.body, userId: req.user.id };
+        const checkin = await checkInService.recordCheckOut(payload);
+        res.status(200).json({ success: true, data: checkin });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+const getMyCheckIns = async (req, res) => {
+    try {
+        const checkins = await checkInService.getCheckInsByUser(req.user.id);
+        res.status(200).json({ success: true, data: checkins });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+module.exports = { submitCheckIn, submitCheckOut, getMyCheckIns };
