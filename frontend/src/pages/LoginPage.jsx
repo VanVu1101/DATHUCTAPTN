@@ -1,0 +1,132 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { login, register } from '../services/authService';
+import { getMyProfile } from '../services/studentService';
+import '../App.css';
+
+function LoginPage() {
+  const [mode, setMode] = useState('login');
+  const [form, setForm] = useState({ email: '', password: '', confirmPassword: '', role: 'STUDENT' });
+  const [message, setMessage] = useState('');
+  const navigate = useNavigate();
+
+  const handleChange = (e) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setMessage('');
+
+    const displayName = form.email
+      .split('@')[0]
+      .replace(/[._-]+/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+
+    if (mode === 'register') {
+      if (form.password.length < 6) {
+        setMessage('Mật khẩu phải có ít nhất 6 ký tự');
+        return;
+      }
+
+      if (form.password !== form.confirmPassword) {
+        setMessage('Xác nhận mật khẩu không khớp');
+        return;
+      }
+
+      try {
+        const res = await register({ email: form.email, password: form.password, role: form.role });
+          if (res && res.success && res.data && res.data.token) {
+            localStorage.setItem('token', res.data.token);
+            // fetch profile to get full user info
+            try {
+              const prof = await getMyProfile();
+              if (prof && prof.success) {
+                localStorage.setItem('user', JSON.stringify(prof.data));
+              } else {
+                localStorage.setItem('user', JSON.stringify({ ...(res.data.user || { email: form.email, role: form.role }), name: displayName }));
+              }
+            } catch (e) {
+              localStorage.setItem('user', JSON.stringify({ ...(res.data.user || { email: form.email, role: form.role }), name: displayName }));
+            }
+            setMessage('Đăng ký thành công');
+            navigate('/dashboard');
+            return;
+          }
+          setMessage(res?.message || 'Đăng ký thất bại');
+      } catch (error) {
+        setMessage(error.response?.data?.message || 'Đăng ký thất bại');
+      }
+      return;
+    }
+
+    try {
+      const res = await login({ email: form.email, password: form.password });
+      if (res && res.success && res.data && res.data.token) {
+        localStorage.setItem('token', res.data.token);
+        // fetch profile to obtain display name and profile details
+        try {
+          const prof = await getMyProfile();
+          if (prof && prof.success) {
+            localStorage.setItem('user', JSON.stringify(prof.data));
+          } else {
+            localStorage.setItem('user', JSON.stringify({ ...(res.data.user || { email: form.email, role: 'STUDENT' }), name: displayName }));
+          }
+        } catch (e) {
+          localStorage.setItem('user', JSON.stringify({ ...(res.data.user || { email: form.email, role: 'STUDENT' }), name: displayName }));
+        }
+        setMessage('Đăng nhập thành công');
+        navigate('/dashboard');
+        return;
+      }
+      setMessage(res?.message || 'Đăng nhập thất bại');
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Đăng nhập thất bại');
+    }
+  };
+
+  return (
+    <div className="auth-page">
+      <div className="auth-card">
+        <div className="auth-hero">
+          <span className="eyebrow">InternHub</span>
+          <h1>{mode === 'login' ? 'Đăng nhập để theo dõi thực tập' : 'Tạo tài khoản mới'}</h1>
+          <p>Quản lý tiến độ, báo cáo và mentor tại cùng một nơi.</p>
+        </div>
+
+        <div className="auth-panel">
+          <div className="auth-toggle">
+            <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setMessage(''); }}>
+              Đăng nhập
+            </button>
+            <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setMessage(''); }}>
+              Đăng ký
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="form-stack">
+            <input name="email" type="email" placeholder="Email" value={form.email} onChange={handleChange} required />
+            <input name="password" type="password" placeholder="Mật khẩu" value={form.password} onChange={handleChange} required />
+
+            {mode === 'register' && (
+              <>
+                <input name="confirmPassword" type="password" placeholder="Xác nhận mật khẩu" value={form.confirmPassword} onChange={handleChange} required />
+                <select name="role" value={form.role} onChange={handleChange}>
+                  <option value="STUDENT">Sinh viên</option>
+                  <option value="ENTERPRISE">Doanh nghiệp</option>
+                  <option value="ADMIN">Quản trị viên</option>
+                </select>
+              </>
+            )}
+
+            <button type="submit">{mode === 'login' ? 'Đăng nhập' : 'Đăng ký'}</button>
+          </form>
+
+          {message && <p className={`form-message ${message.includes('thành công') ? 'success' : ''}`}>{message}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default LoginPage;

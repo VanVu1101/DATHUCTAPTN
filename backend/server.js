@@ -1,0 +1,282 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const { DataTypes } = require('sequelize');
+
+// 1. Import config và models
+const sequelize = require('./src/config/database');
+const User = require('./src/models/user'); 
+const Major = require('./src/models/major');
+const Student = require('./src/models/student');
+const InternshipPeriod = require('./src/models/internshipPeriod');
+const Position = require('./src/models/position');
+const Mentor = require('./src/models/mentor');
+const Internship = require('./src/models/internship');
+const WeeklyReport = require('./src/models/weeklyReport');
+const Task = require('./src/models/task');
+const Report = require('./src/models/report');
+const PeriodDocument = require('./src/models/periodDocument');
+const StudentDocument = require('./src/models/studentDocument');
+const Evaluation = require('./src/models/evaluation');
+const Notification = require('./src/models/notification');
+const CheckIn = require('./src/models/checkIn');
+const Schedule = require('./src/models/schedule');
+const Meeting = require('./src/models/meeting');
+
+const app = express();
+
+// Middlewares cơ bản
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// --- THIẾT LẬP MỐI QUAN HỆ CÁC BẢNG (ASSOCIATIONS) ---
+User.hasOne(Student, { foreignKey: 'userId' });
+Student.belongsTo(User, { foreignKey: 'userId' });
+
+Major.hasMany(Student, { foreignKey: 'majorId' });
+Student.belongsTo(Major, { foreignKey: 'majorId' });
+
+InternshipPeriod.hasMany(Student, { foreignKey: 'periodId' });
+Student.belongsTo(InternshipPeriod, { foreignKey: 'periodId' });
+
+// Mentor liên kết với User
+User.hasOne(Mentor, { foreignKey: 'userId' });
+Mentor.belongsTo(User, { foreignKey: 'userId' });
+
+// Thiết lập quan hệ cho bảng Phân công (Internships)
+Student.hasMany(Internship, { foreignKey: 'studentId' });
+Internship.belongsTo(Student, { foreignKey: 'studentId' });
+
+Student.hasMany(Task, { foreignKey: 'studentId' });
+Task.belongsTo(Student, { foreignKey: 'studentId' });
+
+InternshipPeriod.hasMany(Internship, { foreignKey: 'periodId' });
+Internship.belongsTo(InternshipPeriod, { foreignKey: 'periodId' });
+
+Position.hasMany(Internship, { foreignKey: 'positionId' });
+Internship.belongsTo(Position, { foreignKey: 'positionId' });
+
+Mentor.hasMany(Student, { foreignKey: 'mentorId' });
+Student.belongsTo(Mentor, { foreignKey: 'mentorId' });
+
+Mentor.hasMany(Internship, { foreignKey: 'mentorId' });
+Internship.belongsTo(Mentor, { foreignKey: 'mentorId' });
+
+Student.hasMany(Report, { foreignKey: 'studentId' });
+Report.belongsTo(Student, { foreignKey: 'studentId' });
+
+// --- QUAN HỆ MODULE 3 ---
+Internship.hasMany(Task, { foreignKey: 'internshipId' });
+Task.belongsTo(Internship, { foreignKey: 'internshipId' });
+
+Internship.hasMany(Report, { foreignKey: 'internshipId' });
+Report.belongsTo(Internship, { foreignKey: 'internshipId' });
+
+Internship.hasOne(Evaluation, { foreignKey: 'internshipId' });
+Evaluation.belongsTo(Internship, { foreignKey: 'internshipId' });
+
+Mentor.hasMany(Evaluation, { foreignKey: 'mentorId' });
+Evaluation.belongsTo(Mentor, { foreignKey: 'mentorId' });
+
+// --- QUAN HỆ MODULE 4 ---
+User.hasMany(Notification, { foreignKey: 'userId' });
+Notification.belongsTo(User, { foreignKey: 'userId' });
+
+Internship.hasMany(CheckIn, { foreignKey: 'internshipId' });
+CheckIn.belongsTo(Internship, { foreignKey: 'internshipId' });
+
+InternshipPeriod.hasMany(Schedule, { foreignKey: 'periodId' });
+Schedule.belongsTo(InternshipPeriod, { foreignKey: 'periodId' });
+
+InternshipPeriod.hasMany(Meeting, { foreignKey: 'periodId' });
+Meeting.belongsTo(InternshipPeriod, { foreignKey: 'periodId' });
+
+InternshipPeriod.hasMany(WeeklyReport, { foreignKey: 'periodId' });
+WeeklyReport.belongsTo(InternshipPeriod, { foreignKey: 'periodId' });
+
+WeeklyReport.hasMany(Report, { foreignKey: 'weeklyReportId' });
+Report.belongsTo(WeeklyReport, { foreignKey: 'weeklyReportId' });
+
+InternshipPeriod.hasMany(PeriodDocument, { foreignKey: 'periodId' });
+PeriodDocument.belongsTo(InternshipPeriod, { foreignKey: 'periodId' });
+
+Student.hasMany(StudentDocument, { foreignKey: 'studentId' });
+StudentDocument.belongsTo(Student, { foreignKey: 'studentId' });
+
+// --- ĐĂNG KÝ CÁC ROUTES ---
+const authRoutes = require('./src/routes/auth');
+const studentRoutes = require('./src/routes/student');
+const periodRoutes = require('./src/routes/internshipPeriod');
+const reportRoutes = require('./src/routes/report');
+const reportReviewRoutes = require('./src/routes/reportReview');
+const taskRoutes = require('./src/routes/task');
+const dashboardRoutes = require('./src/routes/dashboard');
+const checkInRoutes = require('./src/routes/checkIn');
+const scheduleRoutes = require('./src/routes/schedule');
+const meetingRoutes = require('./src/routes/meeting');
+const evaluationRoutes = require('./src/routes/evaluation');
+const notificationRoutes = require('./src/routes/notification');
+
+app.use('/api/auth', authRoutes);
+app.use('/api/students', studentRoutes);
+app.use('/api/periods', periodRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/reports-review', reportReviewRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/api/checkins', checkInRoutes);
+app.use('/api/schedules', scheduleRoutes);
+app.use('/api/meetings', meetingRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/evaluations', evaluationRoutes);
+app.use('/api/notifications', notificationRoutes);
+
+// 2. Đồng bộ Database an toàn: tạo bảng mới nếu chưa có, và bổ sung cột thiếu cho bảng tasks
+const ensureTaskTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const taskTable = await queryInterface.describeTable('tasks').catch(() => null);
+
+        if (!taskTable) {
+            return;
+        }
+
+        const columnsToAdd = [
+            ['studentId', { type: DataTypes.INTEGER, allowNull: true }],
+            ['fileUrl', { type: DataTypes.STRING, allowNull: true }],
+            ['fileName', { type: DataTypes.STRING, allowNull: true }],
+            ['fileType', { type: DataTypes.STRING, allowNull: true }],
+            ['submissionComment', { type: DataTypes.TEXT, allowNull: true }],
+            ['submittedAt', { type: DataTypes.DATE, allowNull: true }],
+            ['assignedAt', { type: DataTypes.DATE, allowNull: true }],
+            ['category', { type: DataTypes.STRING, allowNull: true }],
+            ['taskCode', { type: DataTypes.STRING, allowNull: true }],
+            ['priority', { type: DataTypes.ENUM('LOW', 'MEDIUM', 'HIGH'), allowNull: true, defaultValue: 'MEDIUM' }]
+        ];
+
+        for (const [columnName, definition] of columnsToAdd) {
+            if (!taskTable[columnName]) {
+                await queryInterface.addColumn('tasks', columnName, definition);
+                console.log(`✅ Đã thêm cột ${columnName} vào bảng tasks`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi kiểm tra/bổ sung cột bảng tasks:', error);
+    }
+};
+
+const ensureStudentTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const studentTable = await queryInterface.describeTable('students').catch(() => null);
+
+        if (!studentTable) {
+            return;
+        }
+
+        const columnsToAdd = [
+            ['mentorId', { type: DataTypes.INTEGER, allowNull: true }],
+            ['status', { type: DataTypes.ENUM('ACTIVE', 'INACTIVE', 'COMPLETED'), allowNull: true, defaultValue: 'ACTIVE' }]
+        ];
+
+        for (const [columnName, definition] of columnsToAdd) {
+            if (!studentTable[columnName]) {
+                await queryInterface.addColumn('students', columnName, definition);
+                console.log(`✅ Đã thêm cột ${columnName} vào bảng students`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi kiểm tra/bổ sung cột bảng students:', error);
+    }
+};
+
+const ensureReportTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const reportTable = await queryInterface.describeTable('reports').catch(() => null);
+
+        if (!reportTable) {
+            return;
+        }
+
+        const columnsToAdd = [
+            ['studentId', { type: DataTypes.INTEGER, allowNull: true }]
+        ];
+
+        for (const [columnName, definition] of columnsToAdd) {
+            if (!reportTable[columnName]) {
+                await queryInterface.addColumn('reports', columnName, definition);
+                console.log(`✅ Đã thêm cột ${columnName} vào bảng reports`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi kiểm tra/bổ sung cột bảng reports:', error);
+    }
+};
+
+const ensureEvaluationTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const evalTable = await queryInterface.describeTable('evaluations').catch(() => null);
+
+        if (!evalTable) return;
+
+        const columnsToAdd = [
+            ['criteria', { type: DataTypes.JSON, allowNull: true }]
+        ];
+
+        for (const [columnName, definition] of columnsToAdd) {
+            if (!evalTable[columnName]) {
+                await queryInterface.addColumn('evaluations', columnName, definition);
+                console.log(`✅ Đã thêm cột ${columnName} vào bảng evaluations`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi kiểm tra/bổ sung cột bảng evaluations:', error);
+    }
+};
+
+const ensureNotificationTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const notifTable = await queryInterface.describeTable('notifications').catch(() => null);
+
+        if (!notifTable) {
+            return;
+        }
+
+        const columnsToAdd = [
+            ['type', { type: DataTypes.STRING, allowNull: true }],
+            ['data', { type: DataTypes.JSON, allowNull: true }],
+            ['read', { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }]
+        ];
+
+        for (const [columnName, definition] of columnsToAdd) {
+            if (!notifTable[columnName]) {
+                await queryInterface.addColumn('notifications', columnName, definition);
+                console.log(`✅ Đã thêm cột ${columnName} vào bảng notifications`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi kiểm tra/bổ sung cột bảng notifications:', error);
+    }
+};
+
+sequelize.sync()
+    .then(async () => {
+        await ensureTaskTableColumns();
+        await ensureStudentTableColumns();
+        await ensureReportTableColumns();
+        await ensureEvaluationTableColumns();
+        await ensureNotificationTableColumns();
+        console.log('✅ Đã đồng bộ các bảng trong MySQL!');
+    })
+    .catch(err => console.error('❌ Lỗi đồng bộ bảng:', err));
+
+// 3. Khởi chạy Server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
+});
