@@ -3,6 +3,7 @@ const Mentor = require('../models/mentor');
 const Student = require('../models/student');
 const ReportModel = require('../models/report');
 const notificationService = require('../services/notification');
+const { uploadFile } = require('../config/s3');
 
 const mentorOwnsStudent = async (userId, studentId) => {
     const mentor = await Mentor.findOne({ where: { userId } });
@@ -18,7 +19,15 @@ const submitReport = async (req, res) => {
         const payload = { ...req.body };
         payload.userId = req.user.id;
         if (req.file) {
-            payload.fileUrl = `/uploads/reports/${req.file.filename}`;
+            const student = await Student.findOne({ where: { userId: req.user.id } });
+            const folder = `reports/${student?.id || req.user.id}`;
+            const url = await uploadFile({
+                fileBuffer: req.file.buffer,
+                fileName: req.file.originalname,
+                contentType: req.file.mimetype,
+                folder
+            });
+            payload.fileUrl = url;
             payload.fileName = req.file.originalname;
             payload.fileType = req.file.mimetype;
         }

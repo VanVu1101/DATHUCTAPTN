@@ -1,9 +1,10 @@
 import '../App.css';
 import { useEffect, useMemo, useState } from 'react';
-import { submitCheckIn, submitCheckOut, getMyCheckIns } from '../services/checkInService';
+import { submitCheckIn, submitCheckOut, getMyCheckIns, getCachedCheckIns } from '../services/checkInService';
 import { getSchedules, createSchedule, updateSchedule, deleteSchedule } from '../services/scheduleService';
 import { getMeetings, createMeeting, updateMeeting, deleteMeeting } from '../services/meetingService';
 import { getMyProfile, getStoredProfile } from '../services/studentService';
+import { getAllPeriods } from '../services/periodService';
 
 const initialAdminForm = {
   title: '',
@@ -18,6 +19,7 @@ const initialAdminForm = {
   meetingDate: '',
   meetingTime: '',
   agenda: '',
+  periodId: null,
 };
 
 const WEEKDAYS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
@@ -61,6 +63,18 @@ const formatDayShort = (value) => {
   return new Intl.DateTimeFormat('vi-VN', { day: 'numeric', month: 'numeric' }).format(date);
 };
 
+// Normalize a date string to local YYYY-MM-DD regardless of incoming format
+const toLocalDateOnly = (dateStr) => {
+  if (!dateStr) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const formatClock = (value) => {
   if (!value) return '--:--';
   const parts = String(value).split(':');
@@ -70,9 +84,39 @@ const formatClock = (value) => {
 
 const parseTimeValue = (value) => {
   if (!value) return null;
-  const [hour, minute] = String(value).split(':').map(Number);
-  if (Number.isNaN(hour) || Number.isNaN(minute)) return null;
-  return hour * 60 + minute;
+  const text = String(value).trim();
+
+  // Standard 24h format: 15:50
+  const colonMatch = /^([0-2]?\d)\s*:\s*([0-5]?\d)$/.exec(text);
+  if (colonMatch) {
+    const hour = Number(colonMatch[1]);
+    const minute = Number(colonMatch[2]);
+    if (hour >= 0 && hour < 24 && minute >= 0 && minute < 60) {
+      return hour * 60 + minute;
+    }
+  }
+
+  // Vietnamese format: 15 giờ 50 phút, 15 giờ, 15h50, 15h
+  const vietnameseMatch = /^([0-2]?\d)\s*(?:giờ|h)(?:\s*([0-5]?\d)\s*(?:phút|p)?)?$/i.exec(text);
+  if (vietnameseMatch) {
+    const hour = Number(vietnameseMatch[1]);
+    const minute = vietnameseMatch[2] ? Number(vietnameseMatch[2]) : 0;
+    if (hour >= 0 && hour < 24 && minute >= 0 && minute < 60) {
+      return hour * 60 + minute;
+    }
+  }
+
+  // Fallback numeric formats like 1550 or 750
+  const numericMatch = /^([0-2]?\d)([0-5]?\d)$/.exec(text);
+  if (numericMatch) {
+    const hour = Number(numericMatch[1]);
+    const minute = Number(numericMatch[2]);
+    if (hour >= 0 && hour < 24 && minute >= 0 && minute < 60) {
+      return hour * 60 + minute;
+    }
+  }
+
+  return null;
 };
 
 const getWeekStart = (date) => {
@@ -103,6 +147,15 @@ const getEarliestEventStart = (scheduleEvents, meetingEvents) => {
   ];
   if (!eventMinutes.length) return null;
   return Math.min(...eventMinutes);
+};
+
+const getLatestEventEnd = (scheduleEvents, meetingEvents) => {
+  const eventMinutes = [
+    ...scheduleEvents.map((schedule) => parseTimeValue(schedule.endTime) ?? parseTimeValue(schedule.startTime)).filter((min) => min !== null),
+    ...meetingEvents.map((meeting) => parseTimeValue(meeting.meetingTime)).filter((min) => min !== null),
+  ];
+  if (!eventMinutes.length) return null;
+  return Math.max(...eventMinutes);
 };
 
 const formatTimeFromMinutes = (minutes) => {
@@ -141,9 +194,11 @@ function CheckInPage() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [adminForm, setAdminForm] = useState(initialAdminForm);
+  const [periods, setPeriods] = useState([]);
   const [editingScheduleId, setEditingScheduleId] = useState(null);
   const [editingMeetingId, setEditingMeetingId] = useState(null);
   const [dayModalOpen, setDayModalOpen] = useState(false);
+  const [checkInNote, setCheckInNote] = useState('');
 
   useEffect(() => {
     const stored = localStorage.getItem('user');
@@ -157,23 +212,52 @@ function CheckInPage() {
   }, []);
 
   const loadCheckIns = async () => {
+    const cachedCheckIns = getCachedCheckIns();
+    if (Array.isArray(cachedCheckIns) && cachedCheckIns.length > 0) {
+      setCheckIns(cachedCheckIns);
+    }
+
     setLoading(true);
     try {
-      const [profileRes, checkInResult, scheduleResult, meetingResult] = await Promise.allSettled([
-        getMyProfile(),
-        getMyCheckIns(),
-        getSchedules(getStoredProfile()?.periodId || null),
-        getMeetings(getStoredProfile()?.periodId || null),
-      ]);
+      const [profileRes, periodsRes] = await Promise.allSettled([getMyProfile(), getAllPeriods()]);
 
+      let periodId = getStoredProfile()?.periodId || null;
+      let loadedPeriods = [];
       if (profileRes.status === 'fulfilled' && profileRes.value?.success) {
         const nextProfile = profileRes.value.data || null;
         setUser((current) => ({ ...(current || {}), ...nextProfile }));
         localStorage.setItem('user', JSON.stringify({ ...(JSON.parse(localStorage.getItem('user') || '{}')), ...nextProfile }));
+        periodId = nextProfile?.periodId || periodId;
       }
 
+      if (periodsRes.status === 'fulfilled' && periodsRes.value?.success) {
+        loadedPeriods = periodsRes.value.data || [];
+        setPeriods(loadedPeriods);
+      }
+
+      if (!periodId && loadedPeriods.length > 0) {
+        const activePeriod = loadedPeriods.find((period) => period.status === 'ONGOING')
+          || loadedPeriods.find((period) => {
+            const start = new Date(period.startDate).getTime();
+            const end = new Date(period.endDate).getTime();
+            const now = Date.now();
+            return !Number.isNaN(start) && !Number.isNaN(end) && start <= now && now <= end;
+          })
+          || loadedPeriods[0];
+        periodId = activePeriod?.id || null;
+      }
+
+      const [checkInResult, scheduleResult, meetingResult] = await Promise.allSettled([
+        getMyCheckIns(),
+        getSchedules(periodId),
+        getMeetings(periodId),
+      ]);
+
       if (checkInResult.status === 'fulfilled' && checkInResult.value?.success) setCheckIns(checkInResult.value.data || []);
-      if (scheduleResult.status === 'fulfilled' && scheduleResult.value?.success) setSchedules(scheduleResult.value.data || []);
+      if (scheduleResult.status === 'fulfilled' && scheduleResult.value?.success) {
+        console.log('📅 Schedules received:', scheduleResult.value.data);
+        setSchedules(scheduleResult.value.data || []);
+      }
       if (meetingResult.status === 'fulfilled' && meetingResult.value?.success) setMeetings(meetingResult.value.data || []);
     } catch (error) {
       setStatusMessage(error.response?.data?.message || 'Không tải được danh sách check-in.');
@@ -212,11 +296,27 @@ function CheckInPage() {
   const selectedDayCheckIn = useMemo(() => checkIns.find((item) => item.date === selectedDate), [checkIns, selectedDate]);
 
   const selectedDaySchedules = useMemo(() => {
-    return schedules.filter((schedule) => schedule.startDate && schedule.endDate && schedule.startDate <= selectedDate && selectedDate <= schedule.endDate);
+    return schedules.filter((schedule) => {
+      if (!schedule.startDate || !schedule.endDate) return false;
+      const startDate = toLocalDateOnly(schedule.startDate);
+      const endDate = toLocalDateOnly(schedule.endDate);
+      return startDate && endDate && startDate <= selectedDate && selectedDate <= endDate;
+    });
   }, [schedules, selectedDate]);
 
   const selectedDayMeetings = useMemo(() => {
-    return meetings.filter((meeting) => meeting.meetingDate === selectedDate);
+    return meetings.filter((meeting) => {
+      if (!meeting.meetingDate) return false;
+      
+      // Convert to local date string (YYYY-MM-DD)
+      const d = new Date(meeting.meetingDate);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const meetingDate = `${year}-${month}-${day}`;
+      
+      return meetingDate === selectedDate;
+    });
   }, [meetings, selectedDate]);
 
   const selectedDayEarliestStart = useMemo(
@@ -224,18 +324,85 @@ function CheckInPage() {
     [selectedDaySchedules, selectedDayMeetings]
   );
 
-  const selectedDayCheckinThreshold = useMemo(() => {
-    if (selectedDayEarliestStart === null) return null;
-    return formatTimeFromMinutes(selectedDayEarliestStart + 10);
-  }, [selectedDayEarliestStart]);
-
-  const selectedDayExpectedStatus = useMemo(() => {
-    return getExpectedCheckInStatus(selectedDaySchedules, selectedDayMeetings);
+  const selectedDayNextEvent = useMemo(() => {
+    const events = [
+      ...selectedDaySchedules.map((event) => ({ minutes: parseTimeValue(event.startTime), title: event.title })),
+      ...selectedDayMeetings.map((event) => ({ minutes: parseTimeValue(event.meetingTime), title: event.title })),
+    ]
+      .filter((event) => event.minutes !== null)
+      .sort((a, b) => a.minutes - b.minutes);
+    return events[0] || null;
   }, [selectedDaySchedules, selectedDayMeetings]);
 
+  const selectedDayLatestEnd = useMemo(() => {
+    const endMinutes = getLatestEventEnd(selectedDaySchedules, selectedDayMeetings);
+    return endMinutes;
+  }, [selectedDaySchedules, selectedDayMeetings]);
+
+  const selectedDayCheckinThreshold = useMemo(() => {
+    return selectedDayNextEvent ? formatTimeFromMinutes(selectedDayNextEvent.minutes) : null;
+  }, [selectedDayNextEvent]);
+
+  const selectedDayExpectedStatus = useMemo(() => {
+    if (selectedDayCheckIn) return selectedDayCheckIn.status;
+    if (selectedDate !== today) return null;
+    return getExpectedCheckInStatus(selectedDaySchedules, selectedDayMeetings, new Date());
+  }, [selectedDayCheckIn, selectedDate, today, selectedDaySchedules, selectedDayMeetings]);
+
+  const selectedDayCheckInLabel = useMemo(() => {
+    if (todayItem) return 'Đã check-in';
+    if (selectedDate !== today) {
+      return selectedDayNextEvent
+        ? `Check-in từ ${formatTimeFromMinutes(selectedDayNextEvent.minutes)}`
+        : 'Check-in ngày đã chọn';
+    }
+    if (!selectedDayNextEvent) return 'Check-in hôm nay';
+
+    const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    const startMinutes = selectedDayNextEvent.minutes;
+    const lateLimitMinutes = startMinutes + 60;
+    if (currentMinutes < startMinutes) return 'Chưa tới giờ';
+    if (currentMinutes > lateLimitMinutes) return 'Đã trễ giờ';
+    return `Check-in từ ${formatTimeFromMinutes(startMinutes)}`;
+  }, [selectedDate, today, todayItem, selectedDayNextEvent]);
+
+  const canCheckInNow = useMemo(() => {
+    if (selectedDate !== today) return false;
+    if (todayItem) return false;
+    if (!selectedDayNextEvent) return true;
+    const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    const startMinutes = selectedDayNextEvent.minutes;
+    const endMinutes = selectedDayLatestEnd ?? startMinutes + 60;
+    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  }, [selectedDate, today, todayItem, selectedDayNextEvent, selectedDayLatestEnd]);
+
+  const checkInDisabledReason = useMemo(() => {
+    if (selectedDate !== today) return 'Chỉ có thể check-in cho ngày hôm nay.';
+    if (todayItem) return 'Bạn đã check-in hôm nay rồi.';
+    if (selectedDayNextEvent) {
+      const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+      const startMinutes = selectedDayNextEvent.minutes;
+      const endMinutes = selectedDayLatestEnd ?? startMinutes + 60;
+      if (currentMinutes < startMinutes) {
+        return 'Chưa tới giờ';
+      }
+      if (currentMinutes > endMinutes) {
+        return 'Đã trễ giờ';
+      }
+    }
+    return null;
+  }, [selectedDate, today, todayItem, selectedDayNextEvent, selectedDayLatestEnd]);
+
   const getEventsForDate = (date) => {
+    // Use centralized local date normalizer
+
     const scheduleEvents = schedules
-      .filter((schedule) => schedule.startDate && schedule.endDate && schedule.startDate <= date && date <= schedule.endDate)
+      .filter((schedule) => {
+        if (!schedule.startDate || !schedule.endDate) return false;
+        const startDate = toLocalDateOnly(schedule.startDate);
+        const endDate = toLocalDateOnly(schedule.endDate);
+        return startDate && endDate && startDate <= date && date <= endDate;
+      })
       .map((schedule) => ({
         kind: 'work',
         title: schedule.title,
@@ -247,7 +414,11 @@ function CheckInPage() {
       }));
 
     const meetingEvents = meetings
-      .filter((meeting) => meeting.meetingDate === date)
+      .filter((meeting) => {
+        if (!meeting.meetingDate) return false;
+        const meetingDate = toLocalDateOnly(meeting.meetingDate);
+        return meetingDate && meetingDate === date;
+      })
       .map((meeting) => ({
         kind: 'meeting',
         title: meeting.title,
@@ -346,6 +517,12 @@ function CheckInPage() {
     : 'status-pending';
 
   const handleCheckIn = async () => {
+    console.log('[CheckInPage] handleCheckIn', { selectedDate, today, todayItem, canCheckInNow, checkInDisabledReason });
+    if (isAdmin) {
+      setStatusMessage('Admin không được phép check-in.');
+      return;
+    }
+
     if (selectedDate !== today) {
       setStatusMessage('Chỉ có thể check-in cho ngày hôm nay.');
       return;
@@ -356,12 +533,18 @@ function CheckInPage() {
       return;
     }
 
+    if (!canCheckInNow) {
+      setStatusMessage(checkInDisabledReason || 'Chưa tới giờ check-in.');
+      return;
+    }
+
     try {
       const now = new Date();
       const payload = {
         date: selectedDate,
         time: now.toTimeString().split(' ')[0],
         status: getExpectedCheckInStatus(selectedDaySchedules, selectedDayMeetings, now),
+        note: checkInNote || undefined,
       };
       const res = await submitCheckIn(payload);
       if (res && res.success) {
@@ -375,7 +558,33 @@ function CheckInPage() {
     }
   };
 
+  // DEBUG: force-send a check-in regardless of disabled state (temporary)
+  const handleForceCheckIn = async () => {
+    console.log('[CheckInPage] handleForceCheckIn - forcing submit', { selectedDate, today, todayItem, canCheckInNow });
+    try {
+      const now = new Date();
+      const payload = {
+        date: selectedDate,
+        time: now.toTimeString().split(' ')[0],
+        status: getExpectedCheckInStatus(selectedDaySchedules, selectedDayMeetings, now),
+        note: checkInNote || undefined,
+      };
+      const res = await submitCheckIn(payload);
+      console.log('[CheckInPage] handleForceCheckIn response', res);
+      setStatusMessage(res?.message || 'Gửi check-in (force) hoàn tất');
+      loadCheckIns();
+    } catch (err) {
+      console.error('[CheckInPage] handleForceCheckIn error', err);
+      setStatusMessage(err.response?.data?.message || 'Lỗi khi gửi check-in (force).');
+    }
+  };
+
   const handleCheckOut = async () => {
+    if (isAdmin) {
+      setStatusMessage('Admin không được phép check-out.');
+      return;
+    }
+
     if (selectedDate !== today) {
       setStatusMessage('Chỉ có thể check-out cho ngày hôm nay.');
       return;
@@ -419,6 +628,11 @@ function CheckInPage() {
 
   const handleAdminSave = async (kind) => {
     try {
+      if (adminForm.audience === 'SPECIFIC_PERIOD' && !adminForm.periodId) {
+        setStatusMessage('Vui lòng chọn kỳ thực tập khi chọn lịch theo kỳ.');
+        return;
+      }
+
       if (kind === 'schedule') {
         const payload = {
           title: adminForm.title,
@@ -430,6 +644,7 @@ function CheckInPage() {
           endTime: adminForm.endTime,
           location: adminForm.location,
           description: adminForm.description,
+          periodId: adminForm.audience === 'SPECIFIC_PERIOD' ? adminForm.periodId || null : undefined,
         };
         if (editingScheduleId) {
           await updateSchedule(editingScheduleId, payload);
@@ -437,6 +652,10 @@ function CheckInPage() {
           await createSchedule(payload);
         }
       } else {
+        if (adminForm.audience === 'SPECIFIC_PERIOD' && !adminForm.periodId) {
+          setStatusMessage('Vui lòng chọn kỳ thực tập khi tạo cuộc họp theo kỳ.');
+          return;
+        }
         const payload = {
           title: adminForm.title,
           audience: adminForm.audience,
@@ -444,6 +663,7 @@ function CheckInPage() {
           meetingTime: adminForm.meetingTime,
           location: adminForm.location,
           agenda: adminForm.agenda,
+          periodId: adminForm.audience === 'SPECIFIC_PERIOD' ? adminForm.periodId || null : undefined,
         };
         if (editingMeetingId) {
           await updateMeeting(editingMeetingId, payload);
@@ -476,6 +696,7 @@ function CheckInPage() {
       endTime: schedule.endTime || '',
       location: schedule.location || '',
       description: schedule.description || '',
+      periodId: schedule.periodId || null,
     });
   };
 
@@ -490,6 +711,7 @@ function CheckInPage() {
       meetingTime: meeting.meetingTime || '',
       location: meeting.location || '',
       agenda: meeting.agenda || '',
+      periodId: meeting.periodId || null,
     });
   };
 
@@ -522,10 +744,19 @@ function CheckInPage() {
           <p className="hero-text">Điểm danh hàng ngày, rồi bấm vào từng ngày trên lịch để xem chi tiết check-in và lịch liên quan.</p>
         </div>
         <div className="checkin-hero-actions">
-          <button className="btn" onClick={handleCheckIn} disabled={selectedDate !== today || Boolean(todayItem)}>
-            {todayItem ? 'Đã check-in' : 'Check-in hôm nay'}
+          <button
+            type="button"
+            className="btn"
+            onClick={handleCheckIn}
+            disabled={selectedDate !== today || Boolean(todayItem) || !canCheckInNow}
+            title={checkInDisabledReason || ''}
+          >
+            {selectedDayCheckInLabel}
           </button>
-          <button className="btn outline" type="button" onClick={() => setSelectedDate(today)}>
+          <button type="button" className="btn ghost" onClick={handleForceCheckIn}>
+            Force Check-in (debug)
+          </button>
+          <button type="button" className="btn outline" onClick={() => setSelectedDate(today)}>
             Về ngày hôm nay
           </button>
         </div>
@@ -627,8 +858,32 @@ function CheckInPage() {
               const dayCheckIn = checkIns.find((item) => item.date === dateKey);
               const isToday = dateKey === today;
               const isSelected = dateKey === selectedDate;
-              const hasSchedule = schedules.some((schedule) => schedule.startDate && schedule.endDate && schedule.startDate <= dateKey && dateKey <= schedule.endDate);
-              const hasMeeting = meetings.some((meeting) => meeting.meetingDate === dateKey);
+              
+              // Convert to local date string for comparison
+              const toLocalDateString = (dateStr) => {
+                // Nếu đã là YYYY-MM-DD, trả về ngay
+                if (dateStr.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                  return dateStr;
+                }
+                // Nếu là ISO format, parse và convert sang local
+                const d = new Date(dateStr);
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+              };
+              
+              const hasSchedule = schedules.some((schedule) => {
+                if (!schedule.startDate || !schedule.endDate) return false;
+                const startDate = toLocalDateOnly(schedule.startDate);
+                const endDate = toLocalDateOnly(schedule.endDate);
+                return startDate && endDate && startDate <= dateKey && dateKey <= endDate;
+              });
+              const hasMeeting = meetings.some((meeting) => {
+                if (!meeting.meetingDate) return false;
+                const meetingDate = toLocalDateOnly(meeting.meetingDate);
+                return meetingDate && meetingDate === dateKey;
+              });
 
               const dayClass = dayCheckIn
                 ? dayCheckIn.status === 'PRESENT'
@@ -723,12 +978,22 @@ function CheckInPage() {
           </div>
 
           <div className="checkin-actions">
-            <button className="btn" onClick={handleCheckIn} disabled={selectedDate !== today || Boolean(todayItem)}>
-              {todayItem ? 'Đã check-in' : 'Check-in ngày đã chọn'}
-            </button>
-            <button className="btn" onClick={handleCheckOut} disabled={selectedDate !== today || !todayItem || Boolean(todayItem?.checkOutTime)}>
-              {todayItem?.checkOutTime ? 'Đã check-out' : 'Check-out hôm nay'}
-            </button>
+            {!isAdmin && (
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleCheckIn}
+                  disabled={selectedDate !== today || Boolean(todayItem) || !canCheckInNow}
+                  title={checkInDisabledReason || ''}
+                >
+                  {selectedDayCheckInLabel}
+                </button>
+                <button type="button" className="btn" onClick={handleCheckOut} disabled={selectedDate !== today || !todayItem || Boolean(todayItem?.checkOutTime)}>
+                  {todayItem?.checkOutTime ? 'Đã check-out' : 'Check-out hôm nay'}
+                </button>
+              </>
+            )}
             <button className="btn outline" type="button" onClick={() => setSelectedDate(today)}>
               Chuyển về hôm nay
             </button>
@@ -769,12 +1034,29 @@ function CheckInPage() {
                 <p className="empty-text">Không có lịch hôm nay.</p>
               )}
 
+              <div style={{ marginTop: 8 }}>
+                <label style={{ display: 'block', marginBottom: 6, fontWeight: 700 }}>Ghi chú khi check-in (tùy chọn)</label>
+                <textarea
+                  value={checkInNote}
+                  onChange={(e) => setCheckInNote(e.target.value)}
+                  placeholder="Ghi chú ngắn (ví dụ: Đã tham gia buổi học, vắng học phần...)"
+                  style={{ width: '100%', minHeight: 64, padding: 8, borderRadius: 8, border: '1px solid #e6e9ee' }}
+                />
+              </div>
+
               <div className="checkin-actions modal-actions">
-                <button className="btn" type="button" onClick={handleCheckIn} disabled={selectedDate !== today || Boolean(todayItem)}>
-                  {todayItem ? 'Đã check-in' : 'Check-in hôm nay'}
-                </button>
-                <button className="btn outline" type="button" onClick={handleCheckOut} disabled={selectedDate !== today || !todayItem || Boolean(todayItem?.checkOutTime)}>
-                  {todayItem?.checkOutTime ? 'Đã check-out' : 'Check-out'}
+                {!isAdmin && (
+                  <>
+                    <button type="button" className="btn" onClick={handleCheckIn} disabled={selectedDate !== today || Boolean(todayItem) || !canCheckInNow} title={checkInDisabledReason || ''}>
+                      {selectedDayCheckInLabel}
+                    </button>
+                    <button type="button" className="btn outline" onClick={handleCheckOut} disabled={selectedDate !== today || !todayItem || Boolean(todayItem?.checkOutTime)}>
+                      {todayItem?.checkOutTime ? 'Đã check-out' : 'Check-out'}
+                    </button>
+                  </>
+                )}
+                <button className="btn outline" type="button" onClick={() => setDayModalOpen(false)}>
+                  Đóng
                 </button>
               </div>
             </div>
@@ -876,6 +1158,16 @@ function CheckInPage() {
                 <option value="SPECIFIC_PERIOD">Theo kỳ thực tập</option>
               </select>
             </div>
+            {adminForm.audience === 'SPECIFIC_PERIOD' && (
+              <div className="two-box-row">
+                <select value={adminForm.periodId || ''} onChange={(e) => setAdminForm({ ...adminForm, periodId: e.target.value || null })}>
+                  <option value="">-- Chọn kỳ thực tập --</option>
+                  {periods.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name || (`Kỳ ${p.id} (${p.startDate || ''} - ${p.endDate || ''})`)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="two-box-row">
               <input type="date" value={adminForm.startDate} onChange={(e) => setAdminForm({ ...adminForm, startDate: e.target.value })} />
               <input type="date" value={adminForm.endDate} onChange={(e) => setAdminForm({ ...adminForm, endDate: e.target.value })} />

@@ -11,9 +11,11 @@ const StudentDocument = sequelize.define('StudentDocument', {
         allowNull: false
     },
     category: {
-        type: DataTypes.STRING,
+        type: DataTypes.STRING(255),
         allowNull: false,
-        defaultValue: 'HỒ SƠ'
+        defaultValue: 'PROFILE',
+        charset: 'utf8mb4',
+        collate: 'utf8mb4_unicode_ci'
     },
     fileName: {
         type: DataTypes.STRING,
@@ -29,7 +31,9 @@ const StudentDocument = sequelize.define('StudentDocument', {
     }
 }, {
     tableName: 'student_documents',
-    timestamps: true
+    timestamps: true,
+    charset: 'utf8mb4',
+    collate: 'utf8mb4_unicode_ci'
 });
 
 module.exports = StudentDocument;

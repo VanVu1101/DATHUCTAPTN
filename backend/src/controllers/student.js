@@ -1,4 +1,5 @@
 const studentService = require('../services/student');
+const Major = require('../models/major');
 
 const getStudents = async (req, res) => {
     try {
@@ -11,6 +12,7 @@ const getStudents = async (req, res) => {
         const students = await studentService.getStudents(filters);
         res.status(200).json({ success: true, data: students });
     } catch (error) {
+        console.error('getStudents error:', error && error.stack ? error.stack : error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -20,6 +22,7 @@ const getMyProfile = async (req, res) => {
         const profile = await studentService.getMyProfile(req.user.id);
         res.status(200).json({ success: true, data: profile });
     } catch (error) {
+        console.error('getMyProfile error:', error && error.stack ? error.stack : error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -29,7 +32,10 @@ const updateMyProfile = async (req, res) => {
         const profile = await studentService.updateMyProfile(req.user.id, req.body);
         res.status(200).json({ success: true, message: 'Cập nhật hồ sơ thành công', data: profile });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('updateMyProfile error:', error?.message || error);
+        console.error('updateMyProfile error details:', error?.errors || error?.stack || error);
+        console.error('updateMyProfile payload:', req.body);
+        res.status(500).json({ success: false, message: error.message || 'Lỗi cập nhật hồ sơ' });
     }
 };
 
@@ -38,6 +44,7 @@ const getMyProfileDocuments = async (req, res) => {
         const documents = await studentService.getProfileDocuments(req.user.id);
         res.status(200).json({ success: true, data: documents });
     } catch (error) {
+        console.error('getMyProfileDocuments error:', error && error.stack ? error.stack : error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -133,6 +140,54 @@ const deleteStudent = async (req, res) => {
     }
 };
 
+const getMajors = async (req, res) => {
+    try {
+        const majors = await Major.findAll({
+            order: [['name', 'ASC']]
+        });
+        res.status(200).json({ success: true, data: majors });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const createMajor = async (req, res) => {
+    try {
+        const major = await Major.create({
+            name: req.body.name,
+            description: req.body.description || ''
+        });
+        res.status(201).json({ success: true, data: major });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+const updateMajor = async (req, res) => {
+    try {
+        const major = await Major.findByPk(req.params.id);
+        if (!major) return res.status(404).json({ success: false, message: 'Không tìm thấy chuyên ngành' });
+        await major.update({
+            name: req.body.name ?? major.name,
+            description: req.body.description ?? major.description
+        });
+        res.status(200).json({ success: true, data: major });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+const deleteMajor = async (req, res) => {
+    try {
+        const major = await Major.findByPk(req.params.id);
+        if (!major) return res.status(404).json({ success: false, message: 'Không tìm thấy chuyên ngành' });
+        await major.destroy();
+        res.status(200).json({ success: true, message: 'Đã xóa chuyên ngành' });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getStudents,
     getMyProfile,
@@ -146,5 +201,9 @@ module.exports = {
     updateStudent,
     assignStudentPeriod,
     assignStudentMentor,
-    deleteStudent
+    deleteStudent,
+    getMajors,
+    createMajor,
+    updateMajor,
+    deleteMajor
 };

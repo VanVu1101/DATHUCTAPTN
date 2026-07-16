@@ -1,4 +1,5 @@
 const Meeting = require('../models/meeting');
+const { Op } = require('sequelize');
 
 const createMeeting = async (data) => {
     if (!data.title || !data.meetingDate) {
@@ -11,8 +12,15 @@ const createMeeting = async (data) => {
 const getMeetings = async (filters = {}) => {
     const where = {};
 
+    // Nếu có periodId, filter theo period hoặc show ALL_STUDENTS
     if (filters.periodId) {
-      where.periodId = filters.periodId;
+        where[Op.or] = [
+            { periodId: filters.periodId },
+            { audience: 'ALL_STUDENTS' }
+        ];
+    } else {
+        // Không có periodId, chỉ show ALL_STUDENTS
+        where.audience = 'ALL_STUDENTS';
     }
 
     return Meeting.findAll({

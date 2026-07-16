@@ -18,13 +18,19 @@ const CheckIn = sequelize.define('CheckIn', {
         type: DataTypes.ENUM('PRESENT', 'LATE', 'ABSENT'),
         defaultValue: 'PRESENT'
     },
+    note: {
+        type: DataTypes.TEXT,
+        allowNull: true
+    },
     internshipId: {
         type: DataTypes.INTEGER,
         allowNull: false
     }
 }, {
     tableName: 'check_ins',
-    timestamps: true
+    timestamps: true,
+    charset: 'utf8mb4',
+    collate: 'utf8mb4_unicode_ci'
 });
 
 module.exports = CheckIn;

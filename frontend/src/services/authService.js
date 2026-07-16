@@ -19,3 +19,13 @@ export const forgotPassword = async (payload) => {
   const response = await apiClient.post('/auth/forgot-password', payload);
   return response.data;
 };
+
+export const requestPasswordReset = async (email) => {
+  const response = await apiClient.post('/auth/request-password-reset', { email });
+  return response.data;
+};
+
+export const getLoginHistory = async () => {
+  const res = await apiClient.get('/auth/history');
+  return res.data;
+};

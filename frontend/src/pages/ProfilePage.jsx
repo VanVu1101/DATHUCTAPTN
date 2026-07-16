@@ -1,4 +1,5 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   getMyProfile,
   updateMyProfile,
@@ -6,9 +7,11 @@ import {
   uploadProfileDocument,
   getMyProfileDocuments,
   deleteProfileDocument,
+  uploadProfileImage,
 } from '../services/studentService';
 import { getAllPeriods } from '../services/periodService';
 import { changePassword, forgotPassword } from '../services/authService';
+import { getMajors } from '../services/majorService';
 
 const universityOptions = [
   'Đại học Bách Khoa Hà Nội',
@@ -62,8 +65,12 @@ function InfoRow({ icon, label, value, hint }) {
 function ProfilePage() {
   const [profile, setProfile] = useState(null);
   const [editing, setEditing] = useState(false);
+  const navigate = useNavigate();
   const [form, setForm] = useState(initialForm);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef(null);
   const [periods, setPeriods] = useState([]);
+  const [majors, setMajors] = useState([]);
   const [message, setMessage] = useState('');
   const [passwordMessage, setPasswordMessage] = useState('');
   const [accountMode, setAccountMode] = useState('change');
@@ -97,15 +104,17 @@ function ProfilePage() {
     const loadProfile = async () => {
       try {
         setDocumentsLoading(true);
-        const [profileRes, periodsRes, documentsRes] = await Promise.all([
+        const [profileRes, periodsRes, documentsRes, majorsRes] = await Promise.all([
           getMyProfile(),
           getAllPeriods(),
-          getMyProfileDocuments()
+          getMyProfileDocuments(),
+          getMajors()
         ]);
 
         const data = profileRes.success ? profileRes.data || {} : {};
         if (profileRes.success) {
           setProfile(data);
+          persistProfile(data);
           setCurrentSkills({
             technicalSkills: Array.isArray(data.technicalSkills) ? data.technicalSkills.join(', ') : data.technicalSkills || '',
             softSkills: Array.isArray(data.softSkills) ? data.softSkills.join(', ') : data.softSkills || '',
@@ -119,29 +128,33 @@ function ProfilePage() {
 
         setForm((current) => ({
           ...current,
-          fullName: data.fullName || '',
-          email: data.email || '',
-          phoneNumber: data.phoneNumber || '',
-          studentCode: data.studentCode || '',
-          roleHeadline: data.headline || '',
-          linkedin: data.linkedin || '',
-          university: data.university || universityOptions[0],
-          groupName: data.groupName || '',
-          birthDate: data.birthDate || '',
-          className: data.className || '',
-          majorName: data.majorName || '',
-          enterpriseName: data.enterpriseName || '',
-          mentorName: data.mentorName || '',
-          address: data.address || '',
-          bio: data.bio || '',
-          emergencyContact: data.emergencyContact || '',
-          emergencyPhone: data.emergencyPhone || '',
-          periodId: data.periodId || '',
+          fullName: data.fullName || current.fullName || '',
+          email: data.email || current.email || '',
+          phoneNumber: data.phoneNumber || current.phoneNumber || '',
+          studentCode: data.studentCode || current.studentCode || '',
+          roleHeadline: data.headline || current.roleHeadline || '',
+          linkedin: data.linkedin || current.linkedin || '',
+          university: data.university || current.university || universityOptions[0],
+          groupName: data.groupName || current.groupName || '',
+          birthDate: data.birthDate || current.birthDate || '',
+          className: data.className || current.className || '',
+          majorName: data.majorName || current.majorName || '',
+          enterpriseName: data.enterpriseName || current.enterpriseName || '',
+          mentorName: data.mentorName || current.mentorName || '',
+          address: data.address || current.address || '',
+          bio: data.bio || current.bio || '',
+          emergencyContact: data.emergencyContact || current.emergencyContact || '',
+          emergencyPhone: data.emergencyPhone || current.emergencyPhone || '',
+          periodId: data.periodId != null ? String(data.periodId) : current.periodId || '',
         }));
         setResetForm((current) => ({ ...current, email: data.email || '' }));
 
         if (periodsRes.success) {
           setPeriods(periodsRes.data || []);
+        }
+
+        if (majorsRes?.success) {
+          setMajors(majorsRes.data || []);
         }
       } catch (error) {
         setMessage('Không thể tải hồ sơ');
@@ -194,6 +207,59 @@ function ProfilePage() {
     const { name, files } = e.target;
     if (!files?.length) return;
     setUploadDocs((current) => ({ ...current, [name]: files[0] }));
+  };
+
+  const handleAvatarClick = () => {
+    if (avatarInputRef.current) avatarInputRef.current.click();
+  };
+
+  const handleAvatarChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await uploadProfileImage(formData);
+      console.log('uploadProfileImage response', res);
+      if (res?.success) {
+        const next = res.data || null;
+        const normalizedProfile = {
+          ...(profile || {}),
+          ...(next || {}),
+          profileImageUrl: next?.profileImageUrl || profile?.profileImageUrl || '',
+          avatar: next?.profileImageUrl || next?.avatar || profile?.profileImageUrl || profile?.avatar || '',
+          periodName: next?.periodName || profile?.periodName || '',
+          internshipDuration: next?.internshipDuration || profile?.internshipDuration || '',
+          enterpriseName: next?.enterpriseName || profile?.enterpriseName || '',
+          mentorName: next?.mentorName || profile?.mentorName || '',
+          className: next?.className || profile?.className || '',
+          majorName: next?.majorName || profile?.majorName || '',
+          headline: next?.headline || profile?.headline || '',
+          fullName: next?.fullName || profile?.fullName || '',
+        };
+        setProfile(normalizedProfile);
+        persistProfile(normalizedProfile);
+        if (normalizedProfile) {
+          setForm((current) => ({
+            ...current,
+            roleHeadline: normalizedProfile.headline || current.roleHeadline || '',
+            majorName: normalizedProfile.majorName || current.majorName || '',
+            periodId: normalizedProfile.periodId != null ? String(normalizedProfile.periodId) : current.periodId || '',
+          }));
+        }
+      } else {
+        console.error('uploadProfileImage failed response', res);
+        setMessage(res?.message || 'Upload ảnh thất bại');
+      }
+    } catch (err) {
+      console.error('uploadProfileImage error', err);
+      setMessage(err.response?.data?.message || err.message || 'Upload ảnh thất bại');
+    } finally {
+      setAvatarUploading(false);
+      // reset input so same file can be reselected
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
   };
 
   const handleSkillsSubmit = async (e) => {
@@ -322,25 +388,27 @@ function ProfilePage() {
     setMessage('');
 
     try {
-      const res = await updateMyProfile({
-        fullName: form.fullName,
-        phoneNumber: form.phoneNumber,
-        studentCode: form.studentCode,
-        headline: form.roleHeadline,
-        linkedin: form.linkedin,
-        university: form.university,
-        groupName: form.groupName,
-        birthDate: form.birthDate,
-        className: form.className,
-        majorName: form.majorName,
-        enterpriseName: form.enterpriseName,
-        mentorName: form.mentorName,
-        address: form.address,
-        bio: form.bio,
-        emergencyContact: form.emergencyContact,
-        emergencyPhone: form.emergencyPhone,
-        periodId: form.periodId || null,
-      });
+      const payload = {
+        fullName: form.fullName || profile?.fullName || '',
+        phoneNumber: form.phoneNumber || profile?.phoneNumber || '',
+        studentCode: form.studentCode || profile?.studentCode || '',
+        headline: form.roleHeadline || profile?.headline || '',
+        linkedin: form.linkedin || profile?.linkedin || '',
+        university: form.university || profile?.university || '',
+        groupName: form.groupName || profile?.groupName || '',
+        birthDate: form.birthDate || profile?.birthDate || '',
+        className: form.className || profile?.className || '',
+        majorName: form.majorName || profile?.majorName || '',
+        enterpriseName: form.enterpriseName || profile?.enterpriseName || '',
+        mentorName: form.mentorName || profile?.mentorName || '',
+        address: form.address || profile?.address || '',
+        bio: form.bio || profile?.bio || '',
+        emergencyContact: form.emergencyContact || profile?.emergencyContact || '',
+        emergencyPhone: form.emergencyPhone || profile?.emergencyPhone || '',
+        periodId: form.periodId || profile?.periodId || null,
+      };
+
+      const res = await updateMyProfile(payload);
 
       if (res.success) {
         const nextProfile = res.data || null;
@@ -401,8 +469,23 @@ function ProfilePage() {
       <section className="profile-hero card">
         <div className="profile-banner" />
         <div className="profile-header">
-          <div className="profile-avatar-wrapper">
-            <div className="avatar profile-avatar">{displayInitials}</div>
+          <div className="avatar-column">
+            <div className="profile-avatar-wrapper">
+              <div className="avatar profile-avatar" onClick={handleAvatarClick} style={{ cursor: 'pointer' }}>
+                {profile?.profileImageUrl ? (
+                  // eslint-disable-next-line jsx-a11y/img-redundant-alt
+                  <img src={profile.profileImageUrl} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }} />
+                ) : (
+                  displayInitials
+                )}
+              </div>
+            </div>
+            <div className="avatar-action">
+              <button className="btn outline small avatar-change-btn" type="button" onClick={handleAvatarClick} disabled={avatarUploading}>
+                {avatarUploading ? 'Đang tải...' : 'Đổi ảnh'}
+              </button>
+              <input ref={avatarInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
+            </div>
           </div>
           <div className="profile-meta">
             <h1 className="profile-name">{profile?.fullName || 'Người dùng'}</h1>
@@ -416,7 +499,10 @@ function ProfilePage() {
             </div>
           </div>
           <div className="profile-actions">
-            <button className="btn ghost" onClick={() => setEditing((current) => !current)}>
+            <button className="btn outline small" type="button" onClick={() => navigate('/profile/history')}>
+              Lịch sử đăng nhập
+            </button>
+            <button className="btn ghost" type="button" onClick={() => setEditing((current) => !current)}>
               {editing ? 'Hủy' : 'Chỉnh sửa hồ sơ'}
             </button>
           </div>
@@ -470,22 +556,22 @@ function ProfilePage() {
 
                 {!editing ? (
                   <div className="profile-info-grid">
-                    <InfoRow icon="👤" label="Full Name*" value={profile?.fullName || ''} />
+                    <InfoRow icon="👤" label="Họ tên*" value={profile?.fullName || ''} />
                     <InfoRow icon="✉️" label="Email*" value={profile?.email || ''} hint="Email không thể thay đổi" />
-                    <InfoRow icon="📞" label="Phone Number" value={profile?.phoneNumber || ''} />
-                    <InfoRow icon="🪪" label="Student ID" value={profile?.studentCode || ''} />
-                    <InfoRow icon="🏷️" label="Role / Headline" value={profile?.headline || profile?.role || ''} />
+                    <InfoRow icon="📞" label="Số điện thoại" value={profile?.phoneNumber || ''} />
+                    <InfoRow icon="🪪" label="Mã sinh viên" value={profile?.studentCode || ''} />
+                    <InfoRow icon="🏷️" label="Vai trò / Tiêu đề" value={profile?.headline || profile?.role || ''} />
                     <InfoRow icon="🔗" label="LinkedIn" value={profile?.linkedin || ''} />
-                    <InfoRow icon="🏫" label="University" value={profile?.university || ''} />
-                    <InfoRow icon="👥" label="Group" value={profile?.groupName || ''} />
-                    <InfoRow icon="🎂" label="Birth Date" value={profile?.birthDate || ''} />
-                    <InfoRow icon="📚" label="Class / Major" value={`${profile?.className || ''}${profile?.majorName ? ` · ${profile.majorName}` : ''}`} />
+                    <InfoRow icon="🏫" label="Trường" value={profile?.university || ''} />
+                    <InfoRow icon="👥" label="Nhóm" value={profile?.groupName || ''} />
+                    <InfoRow icon="🎂" label="Ngày sinh" value={profile?.birthDate || ''} />
+                    <InfoRow icon="📚" label="Lớp / Ngành" value={`${profile?.className || ''}${profile?.majorName ? ` · ${profile.majorName}` : ''}`} />
                     <InfoRow icon="📅" label="Kỳ thực tập" value={profile?.periodName || 'Chưa chọn'} />
                   </div>
                 ) : (
                   <form className="form-stack profile-form-onecol" onSubmit={handleSubmit}>
                     <label className="profile-field">
-                      <span>Full Name*</span>
+                      <span>Họ tên*</span>
                       <input name="fullName" value={form.fullName} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
@@ -494,15 +580,15 @@ function ProfilePage() {
                       <small>Email không thể thay đổi</small>
                     </label>
                     <label className="profile-field">
-                      <span>Phone Number</span>
+                      <span>Số điện thoại</span>
                       <input name="phoneNumber" value={form.phoneNumber} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Student ID</span>
+                      <span>Mã sinh viên</span>
                       <input name="studentCode" value={form.studentCode} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Role / Headline</span>
+                      <span>Vai trò / Tiêu đề</span>
                       <input name="roleHeadline" value={form.roleHeadline} onChange={handleChange} placeholder="@ VanVuAws" />
                     </label>
                     <label className="profile-field">
@@ -510,7 +596,7 @@ function ProfilePage() {
                       <input name="linkedin" value={form.linkedin} onChange={handleChange} placeholder="https://linkedin.com/in/..." />
                     </label>
                     <label className="profile-field">
-                      <span>University</span>
+                      <span>Trường</span>
                       <select name="university" value={form.university} onChange={handleChange}>
                         {universityOptions.map((option) => (
                           <option key={option} value={option}>{option}</option>
@@ -518,20 +604,25 @@ function ProfilePage() {
                       </select>
                     </label>
                     <label className="profile-field">
-                      <span>Group</span>
+                      <span>Nhóm</span>
                       <input name="groupName" value={form.groupName} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Birth Date</span>
+                      <span>Ngày sinh</span>
                       <input type="date" name="birthDate" value={form.birthDate || ''} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Class</span>
+                      <span>Lớp</span>
                       <input name="className" value={form.className} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Major</span>
-                      <input name="majorName" value={form.majorName} onChange={handleChange} />
+                      <span>Ngành</span>
+                      <select name="majorName" value={form.majorName} onChange={handleChange}>
+                        <option value="">Chọn ngành</option>
+                        {majors.map((major) => (
+                          <option key={major.id} value={major.name}>{major.name}</option>
+                        ))}
+                      </select>
                     </label>
                     <label className="profile-field">
                       <span>Kỳ thực tập</span>
@@ -543,27 +634,27 @@ function ProfilePage() {
                       </select>
                     </label>
                     <label className="profile-field">
-                      <span>Biography</span>
+                      <span>Giới thiệu</span>
                       <textarea name="bio" value={form.bio} onChange={handleChange} rows="4" />
                     </label>
                     <label className="profile-field">
-                      <span>Address</span>
+                      <span>Địa chỉ</span>
                       <input name="address" value={form.address} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Emergency Contact</span>
+                      <span>Liên hệ khẩn cấp</span>
                       <input name="emergencyContact" value={form.emergencyContact} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Emergency Phone</span>
+                      <span>SĐT liên hệ</span>
                       <input name="emergencyPhone" value={form.emergencyPhone} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Business / Internship Company</span>
+                      <span>Doanh nghiệp / Đơn vị</span>
                       <input name="enterpriseName" value={form.enterpriseName} onChange={handleChange} />
                     </label>
                     <label className="profile-field">
-                      <span>Mentor</span>
+                      <span>Người hướng dẫn</span>
                       <input name="mentorName" value={form.mentorName} onChange={handleChange} />
                     </label>
                     <div className="button-row">

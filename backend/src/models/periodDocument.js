@@ -15,9 +15,11 @@ const PeriodDocument = sequelize.define('PeriodDocument', {
         allowNull: false
     },
     category: {
-        type: DataTypes.STRING,
+        type: DataTypes.STRING(255),
         allowNull: false,
-        defaultValue: 'TÀI LIỆU'
+        defaultValue: 'DOCUMENT',
+        charset: 'utf8mb4',
+        collate: 'utf8mb4_unicode_ci'
     },
     fileName: {
         type: DataTypes.STRING,
@@ -33,7 +35,9 @@ const PeriodDocument = sequelize.define('PeriodDocument', {
     }
 }, {
     tableName: 'period_documents',
-    timestamps: true
+    timestamps: true,
+    charset: 'utf8mb4',
+    collate: 'utf8mb4_unicode_ci'
 });
 
 module.exports = PeriodDocument;

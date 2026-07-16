@@ -7,6 +7,7 @@ const Mentor = require('../models/mentor');
 const StudentDocument = require('../models/studentDocument');
 const { uploadFile, deleteFile } = require('../config/s3');
 const reportService = require('./report');
+const { filterStudentRecords, shouldCreateStudentProfile } = require('./studentHelpers');
 
 const ensureDefaultMajor = async () => {
     let major = await Major.findOne();
@@ -14,6 +15,23 @@ const ensureDefaultMajor = async () => {
         major = await Major.create({ name: 'Chưa phân công', description: 'Chuyên ngành mặc định' });
     }
     return major;
+};
+
+const buildStudentCode = (userId) => `SV${String(userId).padStart(4, '0')}${Date.now().toString().slice(-4)}`;
+
+const formatInternshipDuration = (period) => {
+    if (!period?.startDate || !period?.endDate) return '';
+    const start = new Date(period.startDate);
+    const end = new Date(period.endDate);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '';
+
+    const formatDate = (date) => date.toLocaleDateString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
+
+    return `${formatDate(start)} - ${formatDate(end)}`;
 };
 
 const buildProfilePayload = (student, user, options = {}) => ({
@@ -36,12 +54,13 @@ const buildProfilePayload = (student, user, options = {}) => ({
     headline: student?.headline || '',
     emergencyContact: student?.emergencyContact || '',
     emergencyPhone: student?.emergencyPhone || '',
-    profileImageUrl: student?.profileImageUrl || '',
+    profileImageUrl: student?.profileImageUrl || user?.profileImageUrl || '',
     technicalSkills: student?.technicalSkills || [],
     softSkills: student?.softSkills || [],
     languages: student?.languages || [],
     periodId: student?.periodId || null,
     periodName: student?.InternshipPeriod?.name || '',
+    internshipDuration: formatInternshipDuration(student?.InternshipPeriod),
     cvStatus: options.cvStatus || 'Chưa có',
     internshipDocumentStatus: options.internshipDocumentStatus || 'Chưa có',
     documentLink: options.documentLink || '',
@@ -52,35 +71,44 @@ const buildProfilePayload = (student, user, options = {}) => ({
 });
 
 const getMyProfile = async (userId) => {
-    const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role'] });
-    let student = await Student.findOne({
-        where: { userId },
-        include: [
-            { model: User, attributes: ['email', 'role'] },
-            { model: Major, attributes: ['name'] },
-            { model: InternshipPeriod, attributes: ['id', 'name'] }
-        ]
-    });
+    const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role', 'profileImageUrl'] });
+    if (!shouldCreateStudentProfile(user)) {
+        return buildProfilePayload(null, user, {
+            cvStatus: 'Chưa có',
+            internshipDocumentStatus: 'Chưa có',
+            documentLink: '',
+            reportProgress: 0,
+            lastReportStatus: null,
+            lastReportTitle: '',
+            lastReportSubmittedAt: null
+        });
+    }
+
+    let student = await Student.findOne({ where: { userId } });
+    if (student?.majorId) {
+        const major = await Major.findByPk(student.majorId, { attributes: ['name'] });
+        student = { ...student.toJSON(), Major: major };
+    }
+    if (student?.periodId) {
+        const period = await InternshipPeriod.findByPk(student.periodId, { attributes: ['id', 'name', 'startDate', 'endDate'] });
+        student = { ...student, InternshipPeriod: period };
+    }
 
     if (!student) {
         const defaultMajor = await ensureDefaultMajor();
-        student = await Student.create({
-            studentCode: `SV${String(userId).padStart(4, '0')}`,
-            fullName: user?.email?.split('@')[0] || 'Sinh viên',
-            userId,
-            majorId: defaultMajor.id,
-            majorName: defaultMajor.name,
-            className: 'KTPM',
-            enterpriseName: '',
-            mentorName: '',
-            linkedin: '',
-            university: '',
-            groupName: '',
-            birthDate: '',
-            headline: '',
-            emergencyContact: '',
-            emergencyPhone: ''
-        });
+        try {
+            student = await Student.create({
+                studentCode: buildStudentCode(userId),
+                fullName: user?.email?.split('@')[0] || 'Sinh viên',
+                userId,
+                majorId: defaultMajor.id,
+                className: 'KTPM'
+            });
+        } catch (createErr) {
+            console.error('❌ Student.create() failed:', createErr.message);
+            console.error('Full error:', createErr);
+            throw createErr;
+        }
     }
 
     let cvStatus = 'Chưa có';
@@ -137,81 +165,116 @@ const getMyProfile = async (userId) => {
 };
 
 const updateMyProfile = async (userId, payload) => {
-    let student = await Student.findOne({ where: { userId } });
-    const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role'] });
+    try {
+        let student = await Student.findOne({ where: { userId } });
+        const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role', 'profileImageUrl'] });
 
-    if (!student) {
-        const defaultMajor = await ensureDefaultMajor();
-        student = await Student.create({
-            studentCode: `SV${String(userId).padStart(4, '0')}`,
-            fullName: payload.fullName || user?.email?.split('@')[0] || 'Sinh viên',
-            userId,
-            majorId: defaultMajor.id,
-            majorName: payload.majorName || defaultMajor.name,
-            className: payload.className || 'KTPM',
-            enterpriseName: payload.enterpriseName || '',
-            mentorName: payload.mentorName || '',
-            linkedin: payload.linkedin || '',
-            university: payload.university || '',
-            groupName: payload.groupName || '',
-            birthDate: payload.birthDate || '',
-            headline: payload.headline || '',
-            emergencyContact: payload.emergencyContact || '',
-            emergencyPhone: payload.emergencyPhone || '',
-            periodId: payload.periodId || null
-        });
-    }
-
-    if (payload.majorName) {
-        let major = await Major.findOne({ where: { name: payload.majorName } });
-        if (!major) {
-            major = await Major.create({ name: payload.majorName, description: 'Chuyên ngành cập nhật từ hồ sơ' });
+        if (!student) {
+            const defaultMajor = await ensureDefaultMajor();
+            student = await Student.create({
+                studentCode: buildStudentCode(userId),
+                fullName: payload.fullName || user?.email?.split('@')[0] || 'Sinh viên',
+                userId,
+                majorId: defaultMajor.id,
+                majorName: payload.majorName || defaultMajor.name,
+                className: payload.className || 'KTPM',
+                enterpriseName: payload.enterpriseName || '',
+                mentorName: payload.mentorName || '',
+                linkedin: payload.linkedin || '',
+                university: payload.university || '',
+                groupName: payload.groupName || '',
+                birthDate: payload.birthDate || '',
+                headline: payload.headline || '',
+                emergencyContact: payload.emergencyContact || '',
+                emergencyPhone: payload.emergencyPhone || '',
+                periodId: payload.periodId || null
+            });
         }
-        payload.majorId = major.id;
+
+        if (payload.majorName) {
+            let major = await Major.findOne({ where: { name: payload.majorName } });
+            if (!major) {
+                major = await Major.create({ name: payload.majorName, description: 'Chuyên ngành cập nhật từ hồ sơ' });
+            }
+            payload.majorId = major.id;
+        }
+
+        console.log('Updating student with payload:', {
+            fullName: payload.fullName,
+            className: payload.className,
+            majorName: payload.majorName,
+            enterpriseName: payload.enterpriseName,
+            mentorName: payload.mentorName,
+            phoneNumber: payload.phoneNumber,
+            address: payload.address,
+            bio: payload.bio,
+            linkedin: payload.linkedin,
+            university: payload.university,
+            groupName: payload.groupName,
+            birthDate: payload.birthDate,
+            headline: payload.headline,
+            emergencyContact: payload.emergencyContact,
+            emergencyPhone: payload.emergencyPhone,
+            profileImageUrl: payload.profileImageUrl,
+            technicalSkills: payload.technicalSkills,
+            softSkills: payload.softSkills,
+            languages: payload.languages,
+            majorId: payload.majorId || student.majorId,
+            periodId: payload.periodId,
+            studentCode: payload.studentCode
+        });
+
+        const normalizeField = (value, fallback) => (value === undefined || value === '' ? fallback : value);
+
+        const updatedStudent = await student.update({
+            fullName: normalizeField(payload.fullName, student.fullName),
+            className: normalizeField(payload.className, student.className),
+            majorName: normalizeField(payload.majorName, student.majorName),
+            enterpriseName: normalizeField(payload.enterpriseName, student.enterpriseName),
+            mentorName: normalizeField(payload.mentorName, student.mentorName),
+            phoneNumber: normalizeField(payload.phoneNumber, student.phoneNumber),
+            address: normalizeField(payload.address, student.address),
+            bio: normalizeField(payload.bio, student.bio),
+            linkedin: normalizeField(payload.linkedin, student.linkedin),
+            university: normalizeField(payload.university, student.university),
+            groupName: normalizeField(payload.groupName, student.groupName),
+            birthDate: normalizeField(payload.birthDate, student.birthDate),
+            headline: normalizeField(payload.headline, student.headline),
+            emergencyContact: normalizeField(payload.emergencyContact, student.emergencyContact),
+            emergencyPhone: normalizeField(payload.emergencyPhone, student.emergencyPhone),
+            profileImageUrl: normalizeField(payload.profileImageUrl, student.profileImageUrl),
+            technicalSkills: normalizeField(payload.technicalSkills, student.technicalSkills),
+            softSkills: normalizeField(payload.softSkills, student.softSkills),
+            languages: normalizeField(payload.languages, student.languages),
+            majorId: payload.majorId || student.majorId,
+            periodId: payload.periodId === undefined || payload.periodId === '' ? student.periodId : payload.periodId,
+            studentCode: normalizeField(payload.studentCode, student.studentCode)
+        });
+
+        const studentWithRelations = await Student.findByPk(updatedStudent.id, {
+            include: [{ model: InternshipPeriod, attributes: ['id', 'name', 'startDate', 'endDate'] }]
+        });
+
+        return buildProfilePayload(studentWithRelations || updatedStudent, user);
+    } catch (error) {
+        console.error('updateMyProfile error details:', {
+            message: error.message,
+            errors: error.errors,
+            validationErrors: error.validationErrors,
+            original: error.original,
+            sql: error.sql
+        });
+        throw error;
     }
-
-    const updatedStudent = await student.update({
-        fullName: payload.fullName ?? student.fullName,
-        className: payload.className ?? student.className,
-        majorName: payload.majorName ?? student.majorName,
-        enterpriseName: payload.enterpriseName ?? student.enterpriseName,
-        mentorName: payload.mentorName ?? student.mentorName,
-        phoneNumber: payload.phoneNumber ?? student.phoneNumber,
-        address: payload.address ?? student.address,
-        bio: payload.bio ?? student.bio,
-        linkedin: payload.linkedin ?? student.linkedin,
-        university: payload.university ?? student.university,
-        groupName: payload.groupName ?? student.groupName,
-        birthDate: payload.birthDate ?? student.birthDate,
-        headline: payload.headline ?? student.headline,
-        emergencyContact: payload.emergencyContact ?? student.emergencyContact,
-        emergencyPhone: payload.emergencyPhone ?? student.emergencyPhone,
-        profileImageUrl: payload.profileImageUrl ?? student.profileImageUrl,
-        technicalSkills: payload.technicalSkills ?? student.technicalSkills,
-        softSkills: payload.softSkills ?? student.softSkills,
-        languages: payload.languages ?? student.languages,
-        majorId: payload.majorId || student.majorId,
-        periodId: payload.periodId ?? student.periodId,
-        studentCode: payload.studentCode ?? student.studentCode
-    });
-
-    const studentWithRelations = await Student.findByPk(updatedStudent.id, {
-        include: [{ model: InternshipPeriod, attributes: ['id', 'name'] }]
-    });
-
-    return buildProfilePayload(studentWithRelations || updatedStudent, user);
 };
 
 const getProfileDocuments = async (userId) => {
-    const student = await Student.findOne({ where: { userId } });
-    if (!student) throw new Error('Sinh viên không tồn tại');
-
+    const student = await ensureStudentProfile(userId);
     return StudentDocument.findAll({ where: { studentId: student.id } });
 };
 
 const uploadProfileDocument = async (userId, payload, file) => {
-    const student = await Student.findOne({ where: { userId } });
-    if (!student) throw new Error('Sinh viên không tồn tại');
+    const student = await ensureStudentProfile(userId);
 
     const url = await uploadFile({
         fileBuffer: file.buffer,
@@ -231,25 +294,50 @@ const uploadProfileDocument = async (userId, payload, file) => {
 };
 
 const deleteProfileDocument = async (userId, documentId) => {
-    const student = await Student.findOne({ where: { userId } });
-    if (!student) throw new Error('Sinh viên không tồn tại');
+    const student = await ensureStudentProfile(userId);
 
     const document = await StudentDocument.findOne({ where: { id: documentId, studentId: student.id } });
     if (!document) throw new Error('Tài liệu không tồn tại');
 
     const url = document.fileUrl || '';
-    const match = url.match(`https://${process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME}\.s3\.${process.env.AWS_REGION || 'ap-southeast-1'}\.amazonaws\.com/(.+)`);
-    if (match && match[1]) {
-        await deleteFile(match[1]);
+    const useLocal = String(process.env.USE_LOCAL_UPLOAD || '').toLowerCase() === 'true';
+    if (useLocal) {
+        // url like http://localhost:5000/uploads/<key>
+        const m = url.match(/\/uploads\/(.+)$/);
+        if (m && m[1]) {
+            await deleteFile(m[1]);
+        }
+    } else {
+        const match = url.match(`https://${process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME}\\.s3\\.${process.env.AWS_REGION || 'ap-southeast-1'}\\.amazonaws\\.com/(.+)`);
+        if (match && match[1]) {
+            await deleteFile(match[1]);
+        }
     }
 
     await document.destroy();
     return true;
 };
 
+const ensureStudentProfile = async (userId, fallbackName = '') => {
+    let student = await Student.findOne({ where: { userId } });
+    if (student) return student;
+
+    const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role'] });
+    const defaultMajor = await ensureDefaultMajor();
+
+    student = await Student.create({
+        studentCode: buildStudentCode(userId),
+        fullName: fallbackName || user?.email?.split('@')[0] || 'Sinh viên',
+        userId,
+        majorId: defaultMajor.id,
+        className: 'KTPM'
+    });
+
+    return student;
+};
+
 const uploadProfileImage = async (userId, file) => {
-    const student = await Student.findOne({ where: { userId } });
-    if (!student) throw new Error('Sinh viên không tồn tại');
+    const student = await ensureStudentProfile(userId);
 
     const url = await uploadFile({
         fileBuffer: file.buffer,
@@ -258,8 +346,12 @@ const uploadProfileImage = async (userId, file) => {
         folder: `student-profile/${student.id}`
     });
 
+    const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role', 'profileImageUrl'] });
     await student.update({ profileImageUrl: url });
-    return buildProfilePayload(student, await User.findByPk(userId, { attributes: ['id', 'email', 'role'] }));
+    await user.update({ profileImageUrl: url });
+
+    // Return the same profile payload as getMyProfile so frontend gets full period and internship info
+    return getMyProfile(userId);
 };
 
 const getStudents = async (filters = {}) => {
@@ -289,7 +381,7 @@ const getStudents = async (filters = {}) => {
         ],
         order: [['fullName', 'ASC']]
     });
-    return students;
+    return filterStudentRecords(students);
 };
 
 const getAllStudents = async () => {

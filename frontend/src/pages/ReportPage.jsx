@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ReportModal from '../components/ReportModal';
 import ReportScoreModal from '../components/ReportScoreModal';
 import ReviewReportModal from '../components/ReviewReportModal';
-import { getMyReports, getAllReports, reviewReport, getWeeklyReports, getMyWeeklyReports, deleteReport, updateReport } from '../services/reportService';
+import { getMyReports, getAllReports, reviewReport, getWeeklyReports, getMyWeeklyReports, deleteReport, updateReport, getCachedWeeklyReports, getCachedUserReports } from '../services/reportService';
 import { getAllPeriods } from '../services/periodService';
 import { getMyProfile, getStudents } from '../services/studentService';
 import { getEvaluationByInternship } from '../services/evaluationService';
@@ -31,6 +31,15 @@ function ReportPage() {
   const [filter, setFilter] = useState('ALL');
 
   const loadReports = async () => {
+    const cachedWeeklyReports = getCachedWeeklyReports();
+    const cachedUserReports = getCachedUserReports();
+    if (Array.isArray(cachedWeeklyReports) && cachedWeeklyReports.length > 0) {
+      setWeeklyReports(cachedWeeklyReports);
+    }
+    if (Array.isArray(cachedUserReports) && cachedUserReports.length > 0) {
+      setUserReports(cachedUserReports);
+    }
+
     setLoading(true);
     try {
       const stored = localStorage.getItem('user');
