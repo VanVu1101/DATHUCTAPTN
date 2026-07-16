@@ -4,7 +4,14 @@ export const persistProfile = (profile) => {
   if (!profile) return null;
   try {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-    const nextUser = { ...currentUser, ...profile };
+    const nextUser = {
+      ...currentUser,
+      ...profile,
+      profileImageUrl: profile.profileImageUrl || profile.avatar || currentUser.profileImageUrl || currentUser.avatar || '',
+      avatar: profile.avatar || profile.profileImageUrl || currentUser.avatar || currentUser.profileImageUrl || '',
+      fullName: profile.fullName || currentUser.fullName || currentUser.name || '',
+      role: profile.role || currentUser.role || 'STUDENT',
+    };
     localStorage.setItem('user', JSON.stringify(nextUser));
     return nextUser;
   } catch (error) {

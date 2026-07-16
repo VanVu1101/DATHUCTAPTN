@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { login, register } from '../services/authService';
+import { login, register, requestPasswordReset } from '../services/authService';
 import { getMyProfile } from '../services/studentService';
 import '../App.css';
 
@@ -8,6 +8,7 @@ function LoginPage() {
   const [mode, setMode] = useState('login');
   const [form, setForm] = useState({ email: '', password: '', confirmPassword: '', role: 'STUDENT' });
   const [message, setMessage] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -85,6 +86,23 @@ function LoginPage() {
     }
   };
 
+  const handleForgotPassword = async () => {
+    if (!form.email) {
+      setMessage('Vui lòng nhập email trước khi gửi yêu cầu');
+      return;
+    }
+
+    try {
+      setIsResetting(true);
+      const res = await requestPasswordReset(form.email);
+      setMessage(res?.message || 'Đã gửi yêu cầu reset mật khẩu');
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Không thể gửi email reset mật khẩu');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
     <div className="auth-page">
       <div className="auth-card">
@@ -121,6 +139,12 @@ function LoginPage() {
 
             <button type="submit">{mode === 'login' ? 'Đăng nhập' : 'Đăng ký'}</button>
           </form>
+
+          {mode === 'login' && (
+            <button type="button" className="btn outline forgot-password-button" onClick={handleForgotPassword} disabled={isResetting}>
+              {isResetting ? 'Đang gửi...' : 'Quên mật khẩu?'}
+            </button>
+          )}
 
           {message && <p className={`form-message ${message.includes('thành công') ? 'success' : ''}`}>{message}</p>}
         </div>

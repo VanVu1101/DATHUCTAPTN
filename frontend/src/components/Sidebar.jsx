@@ -30,6 +30,7 @@ function Sidebar() {
 
   const navItems = [
     { to: '/', icon: '🏠', label: 'Tổng quan' },
+    { to: '/dashboard', icon: '📊', label: 'Dashboard', adminOnly: true },
     { to: '/profile', icon: '👤', label: 'Hồ sơ cá nhân' },
     { to: '/internship-info', icon: '📚', label: 'Thông tin thực tập' },
     { to: '/checkin', icon: '✅', label: 'Check-in & Lịch họp' },
@@ -41,6 +42,7 @@ function Sidebar() {
     { to: '/certificates', icon: '🎓', label: 'Chứng nhận', comingSoon: true },
     { to: '/notifications', icon: '🔔', label: 'Thông báo' },
     { to: '/students', icon: '🎓', label: 'Quản lý sinh viên', adminOnly: true },
+    { to: '/majors', icon: '📚', label: 'Quản lý chuyên ngành', adminOnly: true },
     { to: '/periods/new', icon: '➕', label: 'Tạo kỳ thực tập', adminOnly: true },
     { to: '/final-report', icon: '📄', label: 'Báo cáo cuối kỳ', comingSoon: true },
   ];
@@ -84,9 +86,14 @@ function Sidebar() {
   }, []);
 
   const handleLogout = () => {
+    // Clear all auth and cached data
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    navigate('/');
+    localStorage.removeItem('profile');
+    localStorage.removeItem('reportsCache');
+    localStorage.removeItem('tasksCache');
+    // Redirect to login
+    navigate('/login', { replace: true });
   };
 
   return (

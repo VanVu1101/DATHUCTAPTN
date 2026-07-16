@@ -1,5 +1,42 @@
 import apiClient from '../api/client';
 
+const WEEKLY_REPORTS_STORAGE_KEY = 'weekly-reports-cache';
+const USER_REPORTS_STORAGE_KEY = 'user-reports-cache';
+
+export const persistWeeklyReports = (reports) => {
+  try {
+    localStorage.setItem(WEEKLY_REPORTS_STORAGE_KEY, JSON.stringify(reports || []));
+  } catch (error) {
+    // ignore storage errors
+  }
+};
+
+export const persistUserReports = (reports) => {
+  try {
+    localStorage.setItem(USER_REPORTS_STORAGE_KEY, JSON.stringify(reports || []));
+  } catch (error) {
+    // ignore storage errors
+  }
+};
+
+export const getCachedWeeklyReports = () => {
+  try {
+    const raw = localStorage.getItem(WEEKLY_REPORTS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (error) {
+    return [];
+  }
+};
+
+export const getCachedUserReports = () => {
+  try {
+    const raw = localStorage.getItem(USER_REPORTS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (error) {
+    return [];
+  }
+};
+
 export const submitReport = async (payload) => {
   const res = await apiClient.request({
     url: '/reports',
@@ -31,11 +68,17 @@ export const getMyWeeklyReports = async (periodId) => {
   const res = await apiClient.get('/reports/weekly-reports/me', {
     params: periodId ? { periodId } : undefined,
   });
+  if (res?.data?.success) {
+    persistWeeklyReports(res.data.data || []);
+  }
   return res.data;
 };
 
 export const getMyReports = async () => {
   const res = await apiClient.get('/reports/me');
+  if (res?.data?.success) {
+    persistUserReports(res.data.data || []);
+  }
   return res.data;
 };
 

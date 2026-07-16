@@ -10,7 +10,7 @@ function DashboardPage() {
     const stored = localStorage.getItem('user');
     const user = stored ? JSON.parse(stored) : null;
     if (!user || user.role !== 'ADMIN') {
-      navigate('/checkin', { replace: true });
+      navigate('/', { replace: true });
       return;
     }
 

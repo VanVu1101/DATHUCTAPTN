@@ -15,6 +15,10 @@ router.post('/profile/documents', upload.single('file'), studentController.uploa
 router.delete('/profile/documents/:id', studentController.deleteProfileDocument);
 router.post('/profile/image', upload.single('file'), studentController.uploadProfileImage);
 router.get('/', checkRole(['ADMIN']), studentController.getStudents);
+router.get('/majors', studentController.getMajors);
+router.post('/majors', checkRole(['ADMIN']), studentController.createMajor);
+router.put('/majors/:id', checkRole(['ADMIN']), studentController.updateMajor);
+router.delete('/majors/:id', checkRole(['ADMIN']), studentController.deleteMajor);
 router.get('/:id', checkRole(['ADMIN']), studentController.getStudentById);
 router.post('/', checkRole(['ADMIN']), studentController.createStudent);
 router.put('/:id', checkRole(['ADMIN']), studentController.updateStudent);

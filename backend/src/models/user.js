@@ -14,10 +14,16 @@ const User = sequelize.define('User', {
     role: {
         type: DataTypes.ENUM('STUDENT', 'ENTERPRISE', 'ADMIN'),
         defaultValue: 'STUDENT'
+    },
+    profileImageUrl: {
+        type: DataTypes.STRING,
+        allowNull: true
     }
 }, {
     tableName: 'users', // Tùy chọn: Ép tên bảng viết thường
-    timestamps: true    // Tự động quản lý thời gian tạo/cập nhật
+    timestamps: true,    // Tự động quản lý thời gian tạo/cập nhật
+    charset: 'utf8mb4',
+    collate: 'utf8mb4_unicode_ci'
 });
 
 module.exports = User;

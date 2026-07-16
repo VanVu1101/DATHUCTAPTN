@@ -301,7 +301,6 @@ function HomePage() {
         : 'Chưa có điểm',
       icon: '⭐',
     },
-    { title: 'Nhiệm vụ', value: tasks.length || 0, subtitle: 'Cần hoàn thành', icon: '📌' },
   ].filter(Boolean);
 
   const taskItems = useMemo(() => {
@@ -416,7 +415,7 @@ function HomePage() {
     setMeetings([]);
     setSchedules([]);
     setPeriods([]);
-    navigate('/');
+    navigate('/login', { replace: true });
   };
 
   return (
@@ -473,7 +472,6 @@ function HomePage() {
       {(taskItems.length > 0 || activityItems.length > 0 || canShowRightColumn) && (
         <section className={`main-columns ${canShowRightColumn ? '' : 'main-columns--single'}`}>
           <div className="col-left">
-            {taskItems.length > 0 && <TaskList tasks={taskItems} />}
             {activityItems.length > 0 && <ActivityList items={activityItems} />}
           </div>
 

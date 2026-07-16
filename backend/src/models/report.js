@@ -43,7 +43,9 @@ const Report = sequelize.define('Report', {
     }
 }, {
     tableName: 'reports',
-    timestamps: true
+    timestamps: true,
+    charset: 'utf8mb4',
+    collate: 'utf8mb4_unicode_ci'
 });
 
 module.exports = Report;

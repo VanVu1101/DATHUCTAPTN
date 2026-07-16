@@ -30,7 +30,9 @@ const Evaluation = sequelize.define('Evaluation', {
     }
 }, {
     tableName: 'evaluations',
-    timestamps: true
+    timestamps: true,
+    charset: 'utf8mb4',
+    collate: 'utf8mb4_unicode_ci'
 });
 
 module.exports = Evaluation;

@@ -24,7 +24,9 @@ const CheckIn = sequelize.define('CheckIn', {
     }
 }, {
     tableName: 'check_ins',
-    timestamps: true
+    timestamps: true,
+    charset: 'utf8mb4',
+    collate: 'utf8mb4_unicode_ci'
 });
 
 module.exports = CheckIn;

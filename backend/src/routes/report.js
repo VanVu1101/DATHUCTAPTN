@@ -3,21 +3,8 @@ const router = express.Router();
 const reportController = require('../controllers/report');
 const { verifyToken, checkRole } = require('../middlewares/auth');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 
-const uploadDir = path.join(__dirname, '..', '..', 'uploads', 'reports');
-fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-	destination: (req, file, cb) => cb(null, uploadDir),
-	filename: (req, file, cb) => {
-		const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
-		cb(null, `${Date.now()}-${safeName}`);
-	}
-});
-
-const upload = multer({ storage });
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Submit a report for current user
 router.post('/', verifyToken, upload.single('file'), reportController.submitReport);
