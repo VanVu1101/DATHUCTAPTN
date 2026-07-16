@@ -49,7 +49,7 @@ const ensureStudentInternship = async (student, periodId = null) => {
     });
 };
 
-const createCheckIn = async ({ userId, date, time, status, internshipId }) => {
+const createCheckIn = async ({ userId, date, time, status, internshipId, note }) => {
     if (!date || !time || !status) {
         throw new Error('Missing required check-in fields');
     }
@@ -146,7 +146,7 @@ const createCheckIn = async ({ userId, date, time, status, internshipId }) => {
         throw new Error('Bạn đã check-in cho ngày hôm nay rồi');
     }
 
-    const checkIn = await CheckIn.create({ date, time, status, internshipId: internship.id });
+    const checkIn = await CheckIn.create({ date, time, status, internshipId: internship.id, note });
     return checkIn;
 };
 

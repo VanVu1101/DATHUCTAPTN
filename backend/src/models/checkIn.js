@@ -18,6 +18,10 @@ const CheckIn = sequelize.define('CheckIn', {
         type: DataTypes.ENUM('PRESENT', 'LATE', 'ABSENT'),
         defaultValue: 'PRESENT'
     },
+    note: {
+        type: DataTypes.TEXT,
+        allowNull: true
+    },
     internshipId: {
         type: DataTypes.INTEGER,
         allowNull: false
