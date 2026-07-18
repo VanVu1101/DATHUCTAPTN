@@ -1,6 +1,30 @@
 const Schedule = require('../models/schedule');
 const { Op } = require('sequelize');
 
+const validateSchedule = (data, partial = false) => {
+    const today = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Ho_Chi_Minh'
+    }).format(new Date());
+    const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (data.startDate && data.startDate < today) throw new Error('Ngày bắt đầu không được nhỏ hơn hôm nay');
+    if (data.endDate && data.endDate < today) throw new Error('Ngày kết thúc không được nhỏ hơn hôm nay');
+    if (data.startDate && data.endDate && data.endDate < data.startDate) {
+        throw new Error('Ngày kết thúc phải từ ngày bắt đầu trở đi');
+    }
+    if (data.startTime && !timePattern.test(String(data.startTime).slice(0, 5))) {
+        throw new Error('Giờ bắt đầu không hợp lệ');
+    }
+    if (data.endTime && !timePattern.test(String(data.endTime).slice(0, 5))) {
+        throw new Error('Giờ kết thúc không hợp lệ');
+    }
+    if (data.startTime && data.endTime && data.startTime >= data.endTime) {
+        throw new Error('Giờ bắt đầu phải nhỏ hơn giờ kết thúc');
+    }
+    if (!partial && (!data.startTime || !data.endTime)) {
+        throw new Error('Vui lòng nhập giờ bắt đầu và giờ kết thúc');
+    }
+};
+
 const createSchedule = async (data) => {
     if (!data.title || !data.startDate || !data.endDate) {
         throw new Error('Thiếu thông tin lịch làm việc');
@@ -9,6 +33,7 @@ const createSchedule = async (data) => {
     if (data.audience === 'SPECIFIC_PERIOD' && !data.periodId) {
         throw new Error('Vui lòng chọn kỳ thực tập cho lịch theo kỳ.');
     }
+    validateSchedule(data);
 
     return Schedule.create(data);
 };
@@ -51,6 +76,12 @@ const getScheduleById = async (id) => {
 
 const updateSchedule = async (id, data) => {
     const schedule = await getScheduleById(id);
+    validateSchedule({
+        startDate: data.startDate ?? schedule.startDate,
+        endDate: data.endDate ?? schedule.endDate,
+        startTime: data.startTime ?? schedule.startTime,
+        endTime: data.endTime ?? schedule.endTime
+    }, true);
     return schedule.update(data);
 };
 

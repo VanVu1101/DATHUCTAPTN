@@ -58,8 +58,67 @@ const submitReport = async (req, res) => {
 
 const createWeeklyReport = async (req, res) => {
     try {
-        const weeklyReport = await reportService.createWeeklyReport(req.body);
-        res.status(201).json({ success: true, data: weeklyReport });
+        const payload = { ...req.body };
+        if (req.file) {
+            const url = await uploadFile({
+                fileBuffer: req.file.buffer,
+                fileName: req.file.originalname,
+                contentType: req.file.mimetype,
+                folder: `weekly-report-templates/${payload.periodId}`
+            });
+            payload.attachmentUrl = url;
+            payload.attachmentName = req.file.originalname;
+        }
+        const weeklyReport = await reportService.createWeeklyReport(payload);
+
+        const students = await Student.findAll({
+            where: { periodId: weeklyReport.periodId },
+            attributes: ['userId']
+        });
+        await Promise.all(students.filter((student) => student.userId).map((student) => (
+            notificationService.createNotification({
+                userId: student.userId,
+                title: `Báo cáo tuần ${weeklyReport.weekNumber}`,
+                message: weeklyReport.title,
+                type: 'WEEKLY_REPORT_CREATED',
+                data: { weeklyReportId: weeklyReport.id, path: '/reports' }
+            }).catch((error) => {
+                console.error('Weekly report notification error:', error.message);
+            })
+        )));
+        res.status(201).json({
+            success: true,
+            message: 'Tạo tuần báo cáo thành công',
+            data: weeklyReport
+        });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+const updateWeeklyReport = async (req, res) => {
+    try {
+        const payload = { ...req.body };
+        if (req.file) {
+            payload.attachmentUrl = await uploadFile({
+                fileBuffer: req.file.buffer,
+                fileName: req.file.originalname,
+                contentType: req.file.mimetype,
+                folder: `weekly-report-templates/${payload.periodId || 'general'}`
+            });
+            payload.attachmentName = req.file.originalname;
+        }
+        const data = await reportService.updateWeeklyReport(req.params.id, payload);
+        res.json({ success: true, message: 'Đã cập nhật tuần báo cáo', data });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+const deleteWeeklyReport = async (req, res) => {
+    try {
+        await reportService.deleteWeeklyReport(req.params.id);
+        res.json({ success: true, message: 'Đã xóa tuần báo cáo' });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
     }
@@ -220,6 +279,8 @@ const getByInternship = async (req, res) => {
 module.exports = {
     submitReport,
     createWeeklyReport,
+    updateWeeklyReport,
+    deleteWeeklyReport,
     getWeeklyReports,
     getMyWeeklyReports,
     getMyReports,

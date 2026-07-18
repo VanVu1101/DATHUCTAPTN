@@ -3,19 +3,35 @@ import { useEffect, useMemo, useState } from 'react';
 import ReportModal from '../components/ReportModal';
 import ReportScoreModal from '../components/ReportScoreModal';
 import ReviewReportModal from '../components/ReviewReportModal';
-import { getMyReports, getAllReports, reviewReport, getWeeklyReports, getMyWeeklyReports, deleteReport, updateReport, getCachedWeeklyReports, getCachedUserReports } from '../services/reportService';
+import {
+  getMyReports,
+  getAllReports,
+  reviewReport,
+  getWeeklyReports,
+  getMyWeeklyReports,
+  updateReport,
+  deleteWeeklyReport,
+  getCachedWeeklyReports,
+  getCachedUserReports,
+} from '../services/reportService';
 import { getAllPeriods } from '../services/periodService';
-import { getMyProfile, getStudents } from '../services/studentService';
+import { getMyProfile } from '../services/studentService';
 import { getEvaluationByInternship } from '../services/evaluationService';
+
+const resolveFileUrl = (value) => {
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value)) return value;
+  const apiOrigin = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/api\/?$/, '');
+  return `${apiOrigin}${value.startsWith('/') ? '' : '/'}${value}`;
+};
 
 function ReportPage() {
   const [weeklyReports, setWeeklyReports] = useState([]);
   const [allReports, setAllReports] = useState([]);
   const [userReports, setUserReports] = useState([]);
   const [periods, setPeriods] = useState([]);
-  const [students, setStudents] = useState([]);
   const [selectedWeeklyReport, setSelectedWeeklyReport] = useState(null);
-  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [selectedWeekId, setSelectedWeekId] = useState('');
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedDetailReport, setSelectedDetailReport] = useState(null);
   const [selectedDetailEvaluation, setSelectedDetailEvaluation] = useState(null);
@@ -29,6 +45,9 @@ function ReportPage() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [filter, setFilter] = useState('ALL');
+  const [adminStatus] = useState(
+    () => new URLSearchParams(window.location.search).get('status') || ''
+  );
 
   const loadReports = async () => {
     const cachedWeeklyReports = getCachedWeeklyReports();
@@ -47,17 +66,15 @@ function ReportPage() {
       setUser(parsed);
 
       if (parsed?.role === 'ADMIN') {
-        const [weeklyRes, reportRes, periodRes, studentsRes] = await Promise.all([
+        const [weeklyRes, reportRes, periodRes] = await Promise.all([
           getWeeklyReports(),
-          getAllReports(),
-          getAllPeriods(),
-          getStudents()
+          getAllReports(adminStatus ? { status: adminStatus } : {}),
+          getAllPeriods()
         ]);
 
         if (weeklyRes?.success) setWeeklyReports(weeklyRes.data || []);
         if (reportRes?.success) setAllReports(reportRes.data || []);
         if (periodRes?.success) setPeriods(periodRes.data || []);
-        setStudents(Array.isArray(studentsRes) ? studentsRes : studentsRes.data || []);
       } else {
         const profileRes = await getMyProfile();
         const periodId = profileRes?.success ? profileRes.data?.periodId : null;
@@ -85,11 +102,14 @@ function ReportPage() {
 
   useEffect(() => {
     if (user?.role === 'ADMIN') {
-      // refetch admin reports when selected student changes
+      // Refetch submissions for the selected week.
       const fetchAdminReports = async () => {
         setLoading(true);
         try {
-          const res = await getAllReports(selectedStudentId ? { studentId: selectedStudentId } : {});
+          const res = await getAllReports({
+            ...(selectedWeekId ? { weeklyReportId: selectedWeekId } : {}),
+            ...(adminStatus ? { status: adminStatus } : {}),
+          });
           if (res?.success) setAllReports(res.data || []);
         } catch (e) {
           /* ignore */
@@ -99,7 +119,7 @@ function ReportPage() {
       };
       fetchAdminReports();
     }
-  }, [selectedStudentId]);
+  }, [selectedWeekId, user?.role, adminStatus]);
 
   const handleReviewSubmit = async (payload) => {
     if (!selectedReviewReport) return;
@@ -113,14 +133,14 @@ function ReportPage() {
     }
   };
 
-  const handleDeleteReport = async (reportId) => {
-    if (!window.confirm('Bạn có chắc muốn xóa báo cáo này?')) return;
+  const handleDeleteWeeklyReport = async (reportId) => {
+    if (!window.confirm('Xóa tuần báo cáo này?')) return;
     try {
-      await deleteReport(reportId);
-      setMessage('Đã xóa báo cáo.');
+      await deleteWeeklyReport(reportId);
+      setMessage('Đã xóa tuần báo cáo.');
       loadReports();
     } catch (error) {
-      setMessage(error.response?.data?.message || 'Xóa báo cáo thất bại.');
+      setMessage(error.response?.data?.message || 'Xóa tuần báo cáo thất bại.');
     }
   };
 
@@ -156,6 +176,13 @@ function ReportPage() {
     setSelectedWeeklyReport(null);
     setSelectedAdminReport(null);
     setModalMode('create');
+    setIsModalOpen(true);
+  };
+
+  const openWeeklyEditModal = (weeklyReport) => {
+    setSelectedWeeklyReport(weeklyReport);
+    setSelectedAdminReport(null);
+    setModalMode('edit-weekly');
     setIsModalOpen(true);
   };
 
@@ -221,10 +248,14 @@ function ReportPage() {
     return weeklyReports;
   }, [filter, weeklyReports]);
 
-  const standaloneReports = useMemo(
-    () => userReports.filter((report) => !report.weeklyReportId),
-    [userReports]
-  );
+  const standaloneReports = useMemo(() => {
+    const reports = userReports.filter((report) => !report.weeklyReportId);
+    if (filter === 'ALL') return reports;
+    if (filter === 'APPROVED') return reports.filter((report) => report.status === 'APPROVED');
+    if (filter === 'PENDING') return reports.filter((report) => report.status === 'SUBMITTED');
+    if (filter === 'REJECTED') return reports.filter((report) => report.status === 'REJECTED');
+    return reports;
+  }, [userReports, filter]);
 
   const showMissingPeriodNotice = !loading && !weeklyReports.length && standaloneReports.length === 0 && user?.role !== 'ADMIN';
   const missingPeriodMessage = profile?.periodId
@@ -302,22 +333,11 @@ function ReportPage() {
             ))}
           </div>
 
-          {user?.role !== 'ADMIN' && !weeklyReports.length && !showMissingPeriodNotice && (
-            <div className="report-action-bar">
-              <button className="btn" type="button" onClick={() => openSubmitModal(null)}>
-                Nộp báo cáo mới
-              </button>
-            </div>
-          )}
-
           {loading ? (
             <p>Đang tải...</p>
           ) : filteredWeeklyReports.length === 0 && standaloneReports.length === 0 ? (
             <>
               <p>{showMissingPeriodNotice ? missingPeriodMessage : 'Không tìm thấy mẫu báo cáo tuần nào để nộp.'}</p>
-              <button className="btn" type="button" onClick={() => openSubmitModal(null)}>
-                Nộp báo cáo mới
-              </button>
             </>
           ) : (
             <>
@@ -330,6 +350,11 @@ function ReportPage() {
                         <div className="report-card-main">
                           <h3>{report.title}</h3>
                           {report.description && <p className="report-card-description">{report.description}</p>}
+                          {report.attachmentUrl && (
+                            <a className="admin-file-link" href={resolveFileUrl(report.attachmentUrl)} target="_blank" rel="noreferrer">
+                              📎 {report.attachmentName || 'Tệp yêu cầu'}
+                            </a>
+                          )}
                           <div className="report-card-meta">
                             <div className="meta-column">
                               <span className="meta-label">Hạn nộp</span>
@@ -361,7 +386,7 @@ function ReportPage() {
                           {report.fileUrl && (
                             <div className="report-file-link" title="Mở file báo cáo">
                               <span className="file-icon">🔗</span>
-                              <a href={`http://localhost:5000${report.fileUrl}`} target="_blank" rel="noreferrer">Mở tệp</a>
+                              <a href={resolveFileUrl(report.fileUrl)} target="_blank" rel="noreferrer" download={report.fileName || undefined}>Mở / tải tệp</a>
                             </div>
                           )}
                           {getReportScore(report) && (
@@ -375,13 +400,18 @@ function ReportPage() {
                               Xem báo cáo
                             </button>
                           )}
-                          <button className="btn outline" type="button" onClick={() => openSubmitModal(report)}>
+                          <button
+                            className="btn outline"
+                            type="button"
+                            disabled={['SUBMITTED', 'APPROVED'].includes(report.submissionStatus)}
+                            onClick={() => openSubmitModal(report)}
+                          >
                             {report.submissionStatus === 'APPROVED'
-                              ? 'Nộp lại'
+                              ? 'Đã nộp'
                               : report.submissionStatus === 'REJECTED'
                                 ? 'Sửa và nộp lại'
                                 : report.submissionStatus === 'SUBMITTED'
-                                  ? 'Nộp lại'
+                                  ? 'Đang chờ duyệt'
                                   : 'Nộp báo cáo'}
                           </button>
                         </div>
@@ -422,7 +452,7 @@ function ReportPage() {
                           {report.fileUrl && (
                             <div className="report-file-link" title="Mở file báo cáo">
                               <span className="file-icon">🔗</span>
-                              <a href={`http://localhost:5000${report.fileUrl}`} target="_blank" rel="noreferrer">Mở tệp</a>
+                              <a href={resolveFileUrl(report.fileUrl)} target="_blank" rel="noreferrer" download={report.fileName || undefined}>Mở / tải tệp</a>
                             </div>
                           )}
                           <button className="btn outline" type="button" onClick={() => openDetailModal(report)}>
@@ -462,12 +492,21 @@ function ReportPage() {
                       <div className="week-badge">Tuần {report.weekNumber}</div>
                       <h3>{report.title}</h3>
                       <p>{report.description}</p>
+                      {report.attachmentUrl && (
+                        <a className="admin-file-link" href={resolveFileUrl(report.attachmentUrl)} target="_blank" rel="noreferrer">
+                          📎 {report.attachmentName || 'Tệp đính kèm'}
+                        </a>
+                      )}
                       <div className="weekly-report-meta">
                         <span>Đợt: {periods.find((period) => String(period.id) === String(report.periodId))?.name || report.periodId}</span>
                         {report.dueDate && <span>Hạn nộp: {new Date(report.dueDate).toLocaleDateString('vi-VN')}</span>}
                       </div>
                     </div>
-                    <span className="status-chip status-done">ACTIVE</span>
+                    <div className="report-card-actions">
+                      <span className="status-chip status-done">ACTIVE</span>
+                      <button className="btn outline" type="button" onClick={() => openWeeklyEditModal(report)}>Sửa</button>
+                      <button className="btn outline danger" type="button" onClick={() => handleDeleteWeeklyReport(report.id)}>Xóa</button>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -476,16 +515,16 @@ function ReportPage() {
         </div>
       )}
 
-      {user?.role === 'ADMIN' && allReports.length > 0 && (
+      {user?.role === 'ADMIN' && (
         <div className="card admin-review-card">
           <h3>Duyệt báo cáo hàng tuần</h3>
           <div className="admin-filters">
             <label>
-              <span>Chọn sinh viên</span>
-              <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
-                <option value="">Tất cả sinh viên</option>
-                {students.map((s) => (
-                  <option key={s.id} value={s.id}>{s.fullName || s.studentCode}</option>
+              <span>Chọn tuần</span>
+              <select value={selectedWeekId} onChange={(e) => setSelectedWeekId(e.target.value)}>
+                <option value="">Tất cả tuần</option>
+                {weeklyReports.map((weekly) => (
+                  <option key={weekly.id} value={weekly.id}>Tuần {weekly.weekNumber} — {weekly.title}</option>
                 ))}
               </select>
             </label>
@@ -495,6 +534,7 @@ function ReportPage() {
               <thead>
                 <tr>
                   <th>Tuần</th>
+                  <th>Sinh viên</th>
                   <th>Nội dung</th>
                   <th>Trạng thái</th>
                   <th>Tệp</th>
@@ -505,18 +545,21 @@ function ReportPage() {
                 {allReports.map((report) => (
                   <tr key={`admin-${report.id}`}>
                     <td>{report.weekNumber}</td>
+                    <td>{report.Student?.fullName || report.Student?.studentCode || '—'}</td>
                     <td>{report.content?.slice(0, 80)}{report.content?.length > 80 ? '...' : ''}</td>
                     <td><span className={`status-chip status-${report.status === 'APPROVED' ? 'done' : report.status === 'REJECTED' ? 'danger' : report.status === 'SUBMITTED' ? 'warning' : 'neutral'}`}>{report.status === 'APPROVED' ? 'Đã duyệt' : report.status === 'REJECTED' ? 'Từ chối' : report.status === 'SUBMITTED' ? 'Chờ duyệt' : 'Chưa'}</span></td>
-                    <td>{report.fileUrl ? <a className="admin-file-link" href={`http://localhost:5000${report.fileUrl}`} target="_blank" rel="noreferrer"><span className="admin-file-icon">📎</span><span>Mở file</span></a> : '—'}</td>
+                    <td>{report.fileUrl ? <a className="admin-file-link" href={resolveFileUrl(report.fileUrl)} target="_blank" rel="noreferrer" download={report.fileName || undefined}><span className="admin-file-icon">📎</span><span>Mở / tải file</span></a> : '—'}</td>
                     <td>
                       <div className="button-row">
                         <button className="btn" type="button" onClick={() => openReviewModal(report)}>Chấm báo cáo</button>
                         <button className="btn outline" type="button" onClick={() => openAdminEditModal(report)}>Sửa</button>
-                        <button className="btn outline danger" type="button" onClick={() => handleDeleteReport(report.id)}>Xóa</button>
                       </div>
                     </td>
                   </tr>
                 ))}
+                {allReports.length === 0 && (
+                  <tr><td colSpan="6">Chưa có sinh viên nộp báo cáo cho tuần đã chọn.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -530,7 +573,6 @@ function ReportPage() {
         periods={periods}
         onClose={closeModal}
         onSave={handleSaveAdminReport}
-        students={students}
       />
 
       <ReportScoreModal

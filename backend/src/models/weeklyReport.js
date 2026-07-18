@@ -25,6 +25,14 @@ const WeeklyReport = sequelize.define('WeeklyReport', {
     status: {
         type: DataTypes.ENUM('ACTIVE', 'ARCHIVED'),
         defaultValue: 'ACTIVE'
+    },
+    attachmentUrl: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    attachmentName: {
+        type: DataTypes.STRING,
+        allowNull: true
     }
 }, {
     tableName: 'weekly_reports',

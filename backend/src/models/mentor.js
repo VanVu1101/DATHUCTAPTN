@@ -20,6 +20,14 @@ const Mentor = sequelize.define('Mentor', {
             model: 'users',
             key: 'id'
         }
+    },
+    ownerUserId: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: {
+            model: 'users',
+            key: 'id'
+        }
     }
 }, {
     tableName: 'mentors',

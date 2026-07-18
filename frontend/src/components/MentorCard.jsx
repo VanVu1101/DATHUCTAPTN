@@ -1,4 +1,8 @@
-function MentorCard({mentor}){
+import { useNavigate } from 'react-router-dom';
+
+function MentorCard({ mentor }) {
+  const navigate = useNavigate();
+
   if (!mentor) {
     return null;
   }
@@ -22,11 +26,15 @@ function MentorCard({mentor}){
         </div>
       </div>
       <div className="mentor-actions">
-        <button className="btn">Lịch họp</button>
-        <button className="btn outline">Nhắn tin</button>
+        <button type="button" className="btn" onClick={() => navigate('/checkin')}>
+          Lịch họp
+        </button>
+        <button type="button" className="btn outline" onClick={() => navigate('/chat')}>
+          Nhắn tin
+        </button>
       </div>
     </div>
-  )
+  );
 }
 
 export default MentorCard;

@@ -1,6 +1,13 @@
 import '../App.css';
 import { useEffect, useMemo, useState } from 'react';
-import { submitCheckIn, submitCheckOut, getMyCheckIns, getCachedCheckIns } from '../services/checkInService';
+import {
+  submitCheckIn,
+  submitCheckOut,
+  getMyCheckIns,
+  getCachedCheckIns,
+  getAdminCheckInSummary,
+  getAdminCheckInDetail,
+} from '../services/checkInService';
 import { getSchedules, createSchedule, updateSchedule, deleteSchedule } from '../services/scheduleService';
 import { getMeetings, createMeeting, updateMeeting, deleteMeeting } from '../services/meetingService';
 import { getMyProfile, getStoredProfile } from '../services/studentService';
@@ -18,6 +25,7 @@ const initialAdminForm = {
   description: '',
   meetingDate: '',
   meetingTime: '',
+  meetingEndTime: '',
   agenda: '',
   periodId: null,
 };
@@ -128,41 +136,8 @@ const getWeekStart = (date) => {
 };
 
 const getExpectedCheckInStatus = (scheduleEvents, meetingEvents, now = new Date()) => {
-  const eventMinutes = [
-    ...scheduleEvents.map((schedule) => parseTimeValue(schedule.startTime)).filter((min) => min !== null),
-    ...meetingEvents.map((meeting) => parseTimeValue(meeting.meetingTime)).filter((min) => min !== null),
-  ];
-
-  if (!eventMinutes.length) return 'PRESENT';
-
-  const earliestStart = Math.min(...eventMinutes);
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
-  return currentMinutes <= earliestStart + 10 ? 'PRESENT' : 'LATE';
-};
-
-const getEarliestEventStart = (scheduleEvents, meetingEvents) => {
-  const eventMinutes = [
-    ...scheduleEvents.map((schedule) => parseTimeValue(schedule.startTime)).filter((min) => min !== null),
-    ...meetingEvents.map((meeting) => parseTimeValue(meeting.meetingTime)).filter((min) => min !== null),
-  ];
-  if (!eventMinutes.length) return null;
-  return Math.min(...eventMinutes);
-};
-
-const getLatestEventEnd = (scheduleEvents, meetingEvents) => {
-  const eventMinutes = [
-    ...scheduleEvents.map((schedule) => parseTimeValue(schedule.endTime) ?? parseTimeValue(schedule.startTime)).filter((min) => min !== null),
-    ...meetingEvents.map((meeting) => parseTimeValue(meeting.meetingTime)).filter((min) => min !== null),
-  ];
-  if (!eventMinutes.length) return null;
-  return Math.max(...eventMinutes);
-};
-
-const formatTimeFromMinutes = (minutes) => {
-  if (minutes === null || minutes === undefined) return '--:--';
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  return `${pad(hour)}:${pad(minute)}`;
+  return currentMinutes <= 9 * 60 ? 'PRESENT' : 'LATE';
 };
 
 const buildCalendarCells = (monthValue) => {
@@ -199,6 +174,8 @@ function CheckInPage() {
   const [editingMeetingId, setEditingMeetingId] = useState(null);
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [checkInNote, setCheckInNote] = useState('');
+  const [adminAttendance, setAdminAttendance] = useState([]);
+  const [attendanceDetail, setAttendanceDetail] = useState(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('user');
@@ -247,10 +224,14 @@ function CheckInPage() {
         periodId = activePeriod?.id || null;
       }
 
-      const [checkInResult, scheduleResult, meetingResult] = await Promise.allSettled([
-        getMyCheckIns(),
+      const storedRole = (() => {
+        try { return JSON.parse(localStorage.getItem('user') || '{}').role; } catch { return null; }
+      })();
+      const [checkInResult, scheduleResult, meetingResult, adminSummaryResult] = await Promise.allSettled([
+        storedRole === 'STUDENT' ? getMyCheckIns() : Promise.resolve({ success: true, data: [] }),
         getSchedules(periodId),
         getMeetings(periodId),
+        storedRole === 'ADMIN' ? getAdminCheckInSummary() : Promise.resolve([]),
       ]);
 
       if (checkInResult.status === 'fulfilled' && checkInResult.value?.success) setCheckIns(checkInResult.value.data || []);
@@ -259,6 +240,7 @@ function CheckInPage() {
         setSchedules(scheduleResult.value.data || []);
       }
       if (meetingResult.status === 'fulfilled' && meetingResult.value?.success) setMeetings(meetingResult.value.data || []);
+      if (adminSummaryResult.status === 'fulfilled') setAdminAttendance(adminSummaryResult.value || []);
     } catch (error) {
       setStatusMessage(error.response?.data?.message || 'Không tải được danh sách check-in.');
     } finally {
@@ -271,6 +253,7 @@ function CheckInPage() {
   }, []);
 
   const isAdmin = user?.role === 'ADMIN';
+  const isStudent = user?.role === 'STUDENT';
   const calendarCells = useMemo(() => buildCalendarCells(monthCursor), [monthCursor]);
   const currentMonthLabel = useMemo(() => formatMonthLabel(monthCursor), [monthCursor]);
 
@@ -319,30 +302,6 @@ function CheckInPage() {
     });
   }, [meetings, selectedDate]);
 
-  const selectedDayEarliestStart = useMemo(
-    () => getEarliestEventStart(selectedDaySchedules, selectedDayMeetings),
-    [selectedDaySchedules, selectedDayMeetings]
-  );
-
-  const selectedDayNextEvent = useMemo(() => {
-    const events = [
-      ...selectedDaySchedules.map((event) => ({ minutes: parseTimeValue(event.startTime), title: event.title })),
-      ...selectedDayMeetings.map((event) => ({ minutes: parseTimeValue(event.meetingTime), title: event.title })),
-    ]
-      .filter((event) => event.minutes !== null)
-      .sort((a, b) => a.minutes - b.minutes);
-    return events[0] || null;
-  }, [selectedDaySchedules, selectedDayMeetings]);
-
-  const selectedDayLatestEnd = useMemo(() => {
-    const endMinutes = getLatestEventEnd(selectedDaySchedules, selectedDayMeetings);
-    return endMinutes;
-  }, [selectedDaySchedules, selectedDayMeetings]);
-
-  const selectedDayCheckinThreshold = useMemo(() => {
-    return selectedDayNextEvent ? formatTimeFromMinutes(selectedDayNextEvent.minutes) : null;
-  }, [selectedDayNextEvent]);
-
   const selectedDayExpectedStatus = useMemo(() => {
     if (selectedDayCheckIn) return selectedDayCheckIn.status;
     if (selectedDate !== today) return null;
@@ -351,47 +310,34 @@ function CheckInPage() {
 
   const selectedDayCheckInLabel = useMemo(() => {
     if (todayItem) return 'Đã check-in';
-    if (selectedDate !== today) {
-      return selectedDayNextEvent
-        ? `Check-in từ ${formatTimeFromMinutes(selectedDayNextEvent.minutes)}`
-        : 'Check-in ngày đã chọn';
-    }
-    if (!selectedDayNextEvent) return 'Check-in hôm nay';
-
+    if (selectedDate !== today) return 'Chỉ check-in hôm nay';
     const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-    const startMinutes = selectedDayNextEvent.minutes;
-    const lateLimitMinutes = startMinutes + 60;
-    if (currentMinutes < startMinutes) return 'Chưa tới giờ';
-    if (currentMinutes > lateLimitMinutes) return 'Đã trễ giờ';
-    return `Check-in từ ${formatTimeFromMinutes(startMinutes)}`;
-  }, [selectedDate, today, todayItem, selectedDayNextEvent]);
+    if (currentMinutes < 8 * 60 + 30) return 'Mở lúc 08:30';
+    if (currentMinutes > 9 * 60 + 30) return 'Đã quá giờ — Vắng';
+    return currentMinutes <= 9 * 60 ? 'Check-in đúng giờ' : 'Check-in đi muộn';
+  }, [selectedDate, today, todayItem]);
 
   const canCheckInNow = useMemo(() => {
     if (selectedDate !== today) return false;
     if (todayItem) return false;
-    if (!selectedDayNextEvent) return true;
     const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-    const startMinutes = selectedDayNextEvent.minutes;
-    const endMinutes = selectedDayLatestEnd ?? startMinutes + 60;
-    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
-  }, [selectedDate, today, todayItem, selectedDayNextEvent, selectedDayLatestEnd]);
+    return currentMinutes >= 8 * 60 + 30 && currentMinutes <= 9 * 60 + 30;
+  }, [selectedDate, today, todayItem]);
+
+  const canCheckOutNow = useMemo(() => {
+    if (selectedDate !== today || !todayItem || todayItem.checkOutTime) return false;
+    const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    return currentMinutes >= 16 * 60 + 30 && currentMinutes <= 17 * 60;
+  }, [selectedDate, today, todayItem]);
 
   const checkInDisabledReason = useMemo(() => {
     if (selectedDate !== today) return 'Chỉ có thể check-in cho ngày hôm nay.';
     if (todayItem) return 'Bạn đã check-in hôm nay rồi.';
-    if (selectedDayNextEvent) {
-      const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-      const startMinutes = selectedDayNextEvent.minutes;
-      const endMinutes = selectedDayLatestEnd ?? startMinutes + 60;
-      if (currentMinutes < startMinutes) {
-        return 'Chưa tới giờ';
-      }
-      if (currentMinutes > endMinutes) {
-        return 'Đã trễ giờ';
-      }
-    }
+    const currentMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+    if (currentMinutes < 8 * 60 + 30) return 'Check-in chỉ mở từ 08:30.';
+    if (currentMinutes > 9 * 60 + 30) return 'Đã quá 09:30, hôm nay được tính vắng.';
     return null;
-  }, [selectedDate, today, todayItem, selectedDayNextEvent, selectedDayLatestEnd]);
+  }, [selectedDate, today, todayItem]);
 
   const getEventsForDate = (date) => {
     // Use centralized local date normalizer
@@ -490,6 +436,19 @@ function CheckInPage() {
     setDayModalOpen(getEventsForDate(dateKey).length > 0);
   };
 
+  const openAttendanceDetail = async (row, status) => {
+    try {
+      const data = await getAdminCheckInDetail({
+        studentId: row.studentId,
+        status,
+        periodId: undefined,
+      });
+      setAttendanceDetail(data);
+    } catch (error) {
+      setStatusMessage(error.response?.data?.message || 'Không tải được chi tiết điểm danh.');
+    }
+  };
+
   const selectedCheckInStatus = useMemo(() => {
     if (selectedDayCheckIn) return selectedDayCheckIn.status;
     if (selectedDate !== today) return null;
@@ -498,7 +457,7 @@ function CheckInPage() {
 
   const selectedStatusLabel = selectedDayCheckIn
     ? selectedDayCheckIn.checkOutTime
-      ? 'Đã check-out'
+      ? 'Complete'
       : selectedDayCheckIn.status === 'PRESENT'
         ? 'Đúng giờ'
         : selectedDayCheckIn.status === 'LATE'
@@ -518,8 +477,8 @@ function CheckInPage() {
 
   const handleCheckIn = async () => {
     console.log('[CheckInPage] handleCheckIn', { selectedDate, today, todayItem, canCheckInNow, checkInDisabledReason });
-    if (isAdmin) {
-      setStatusMessage('Admin không được phép check-in.');
+    if (!isStudent) {
+      setStatusMessage('Chỉ sinh viên được phép check-in.');
       return;
     }
 
@@ -558,30 +517,9 @@ function CheckInPage() {
     }
   };
 
-  // DEBUG: force-send a check-in regardless of disabled state (temporary)
-  const handleForceCheckIn = async () => {
-    console.log('[CheckInPage] handleForceCheckIn - forcing submit', { selectedDate, today, todayItem, canCheckInNow });
-    try {
-      const now = new Date();
-      const payload = {
-        date: selectedDate,
-        time: now.toTimeString().split(' ')[0],
-        status: getExpectedCheckInStatus(selectedDaySchedules, selectedDayMeetings, now),
-        note: checkInNote || undefined,
-      };
-      const res = await submitCheckIn(payload);
-      console.log('[CheckInPage] handleForceCheckIn response', res);
-      setStatusMessage(res?.message || 'Gửi check-in (force) hoàn tất');
-      loadCheckIns();
-    } catch (err) {
-      console.error('[CheckInPage] handleForceCheckIn error', err);
-      setStatusMessage(err.response?.data?.message || 'Lỗi khi gửi check-in (force).');
-    }
-  };
-
   const handleCheckOut = async () => {
-    if (isAdmin) {
-      setStatusMessage('Admin không được phép check-out.');
+    if (!isStudent) {
+      setStatusMessage('Chỉ sinh viên được phép check-out.');
       return;
     }
 
@@ -597,6 +535,10 @@ function CheckInPage() {
 
     if (todayItem.checkOutTime) {
       setStatusMessage('Bạn đã check-out cho ngày hôm nay rồi.');
+      return;
+    }
+    if (!canCheckOutNow) {
+      setStatusMessage('Checkout chỉ mở từ 16:30 đến 17:00.');
       return;
     }
 
@@ -628,12 +570,21 @@ function CheckInPage() {
 
   const handleAdminSave = async (kind) => {
     try {
+      const minDate = toISODateLocal(new Date());
       if (adminForm.audience === 'SPECIFIC_PERIOD' && !adminForm.periodId) {
         setStatusMessage('Vui lòng chọn kỳ thực tập khi chọn lịch theo kỳ.');
         return;
       }
 
       if (kind === 'schedule') {
+        if (!adminForm.startDate || !adminForm.endDate || adminForm.startDate < minDate || adminForm.endDate < minDate) {
+          setStatusMessage('Ngày bắt đầu/kết thúc không được nhỏ hơn hôm nay.');
+          return;
+        }
+        if (!adminForm.startTime || !adminForm.endTime || adminForm.startTime >= adminForm.endTime) {
+          setStatusMessage('Giờ bắt đầu phải nhỏ hơn giờ kết thúc.');
+          return;
+        }
         const payload = {
           title: adminForm.title,
           type: adminForm.type,
@@ -656,11 +607,20 @@ function CheckInPage() {
           setStatusMessage('Vui lòng chọn kỳ thực tập khi tạo cuộc họp theo kỳ.');
           return;
         }
+        if (!adminForm.meetingDate || adminForm.meetingDate < minDate) {
+          setStatusMessage('Ngày họp không được nhỏ hơn hôm nay.');
+          return;
+        }
+        if (!adminForm.meetingTime || !adminForm.meetingEndTime || adminForm.meetingTime >= adminForm.meetingEndTime) {
+          setStatusMessage('Giờ bắt đầu phải nhỏ hơn giờ kết thúc.');
+          return;
+        }
         const payload = {
           title: adminForm.title,
           audience: adminForm.audience,
           meetingDate: adminForm.meetingDate,
           meetingTime: adminForm.meetingTime,
+          endTime: adminForm.meetingEndTime,
           location: adminForm.location,
           agenda: adminForm.agenda,
           periodId: adminForm.audience === 'SPECIFIC_PERIOD' ? adminForm.periodId || null : undefined,
@@ -709,6 +669,7 @@ function CheckInPage() {
       audience: meeting.audience || 'ALL_STUDENTS',
       meetingDate: meeting.meetingDate || '',
       meetingTime: meeting.meetingTime || '',
+      meetingEndTime: meeting.endTime || '',
       location: meeting.location || '',
       agenda: meeting.agenda || '',
       periodId: meeting.periodId || null,
@@ -744,18 +705,17 @@ function CheckInPage() {
           <p className="hero-text">Điểm danh hàng ngày, rồi bấm vào từng ngày trên lịch để xem chi tiết check-in và lịch liên quan.</p>
         </div>
         <div className="checkin-hero-actions">
-          <button
-            type="button"
-            className="btn"
-            onClick={handleCheckIn}
-            disabled={selectedDate !== today || Boolean(todayItem) || !canCheckInNow}
-            title={checkInDisabledReason || ''}
-          >
-            {selectedDayCheckInLabel}
-          </button>
-          <button type="button" className="btn ghost" onClick={handleForceCheckIn}>
-            Force Check-in (debug)
-          </button>
+          {isStudent && (
+            <button
+              type="button"
+              className="btn"
+              onClick={handleCheckIn}
+              disabled={selectedDate !== today || Boolean(todayItem) || !canCheckInNow}
+              title={checkInDisabledReason || ''}
+            >
+              {selectedDayCheckInLabel}
+            </button>
+          )}
           <button type="button" className="btn outline" onClick={() => setSelectedDate(today)}>
             Về ngày hôm nay
           </button>
@@ -764,7 +724,7 @@ function CheckInPage() {
 
       {statusMessage && <div className="info-card"><p>{statusMessage}</p></div>}
 
-      <div className="checkin-summary-grid">
+      {isStudent && <div className="checkin-summary-grid">
         <div className="checkin-summary-card highlight">
           <p className="subtle-text">Ngày được chọn</p>
           <h2>{formatLongDate(selectedDate)}</h2>
@@ -781,9 +741,7 @@ function CheckInPage() {
           </div>
           <p className="box-meta">
             {selectedDate === today
-              ? selectedDayCheckinThreshold
-                ? `Muộn nếu check-in sau ${selectedDayCheckinThreshold}`
-                : 'Bấm nút check-in để xác nhận ngày hôm nay.'
+              ? 'Đúng giờ 08:30–09:00 · Đi muộn 09:01–09:30 · Checkout 16:30–17:00.'
               : 'Chọn một ngày khác trên lịch để xem thông tin.'}
           </p>
         </div>
@@ -823,7 +781,7 @@ function CheckInPage() {
           </div>
           <div className="box-meta">{dayStatusHeadline}</div>
         </div>
-      </div>
+      </div>}
 
       <div className="checkin-main-grid">
         <section className="card calendar-card">
@@ -984,13 +942,13 @@ function CheckInPage() {
                   type="button"
                   className="btn"
                   onClick={handleCheckIn}
-                  disabled={selectedDate !== today || Boolean(todayItem) || !canCheckInNow}
+                  disabled={!isStudent || selectedDate !== today || Boolean(todayItem) || !canCheckInNow}
                   title={checkInDisabledReason || ''}
                 >
                   {selectedDayCheckInLabel}
                 </button>
-                <button type="button" className="btn" onClick={handleCheckOut} disabled={selectedDate !== today || !todayItem || Boolean(todayItem?.checkOutTime)}>
-                  {todayItem?.checkOutTime ? 'Đã check-out' : 'Check-out hôm nay'}
+                <button type="button" className="btn" onClick={handleCheckOut} disabled={!isStudent || !canCheckOutNow} title="Checkout mở từ 16:30 đến 17:00">
+                  {todayItem?.checkOutTime ? 'Complete' : 'Check-out hôm nay'}
                 </button>
               </>
             )}
@@ -1013,13 +971,13 @@ function CheckInPage() {
             </div>
 
             <div className="form-stack">
-              <div className="box-light">
+              {isStudent && <div className="box-light">
                 <p className="box-label">Trạng thái check-in</p>
                 <h3>{selectedStatusLabel}</h3>
                 {selectedDate === today && !selectedDayCheckIn && selectedCheckInStatus === 'LATE' ? (
                   <p className="modal-note">Bạn đã trễ hơn 10 phút so với giờ dự kiến.</p>
                 ) : null}
-              </div>
+              </div>}
 
               {selectedDayEvents.length > 0 ? (
                 selectedDayEvents.map((event, idx) => (
@@ -1034,7 +992,7 @@ function CheckInPage() {
                 <p className="empty-text">Không có lịch hôm nay.</p>
               )}
 
-              <div style={{ marginTop: 8 }}>
+              {isStudent && <div style={{ marginTop: 8 }}>
                 <label style={{ display: 'block', marginBottom: 6, fontWeight: 700 }}>Ghi chú khi check-in (tùy chọn)</label>
                 <textarea
                   value={checkInNote}
@@ -1042,16 +1000,16 @@ function CheckInPage() {
                   placeholder="Ghi chú ngắn (ví dụ: Đã tham gia buổi học, vắng học phần...)"
                   style={{ width: '100%', minHeight: 64, padding: 8, borderRadius: 8, border: '1px solid #e6e9ee' }}
                 />
-              </div>
+              </div>}
 
               <div className="checkin-actions modal-actions">
                 {!isAdmin && (
                   <>
-                    <button type="button" className="btn" onClick={handleCheckIn} disabled={selectedDate !== today || Boolean(todayItem) || !canCheckInNow} title={checkInDisabledReason || ''}>
+                    <button type="button" className="btn" onClick={handleCheckIn} disabled={!isStudent || selectedDate !== today || Boolean(todayItem) || !canCheckInNow} title={checkInDisabledReason || ''}>
                       {selectedDayCheckInLabel}
                     </button>
-                    <button type="button" className="btn outline" onClick={handleCheckOut} disabled={selectedDate !== today || !todayItem || Boolean(todayItem?.checkOutTime)}>
-                      {todayItem?.checkOutTime ? 'Đã check-out' : 'Check-out'}
+                    <button type="button" className="btn outline" onClick={handleCheckOut} disabled={!isStudent || !canCheckOutNow} title="Checkout mở từ 16:30 đến 17:00">
+                      {todayItem?.checkOutTime ? 'Complete' : 'Check-out'}
                     </button>
                   </>
                 )}
@@ -1123,7 +1081,7 @@ function CheckInPage() {
                     </span>
                   </div>
                   <div className="meeting-meta">
-                    <span>{formatClock(meeting.meetingTime)}</span>
+                    <span>{formatClock(meeting.meetingTime)}{meeting.endTime ? ` - ${formatClock(meeting.endTime)}` : ''}</span>
                     <span>{meeting.location || 'Chưa có địa điểm'}</span>
                     <span>{meeting.audience === 'ALL_STUDENTS' ? 'Tất cả sinh viên' : 'Theo kỳ thực tập'}</span>
                   </div>
@@ -1140,6 +1098,49 @@ function CheckInPage() {
           </div>
         )}
       </div>
+
+      {isAdmin && (
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <h3>Tổng hợp điểm danh sinh viên</h3>
+              <p>Chọn vào số buổi để xem thời gian check-in/check-out chi tiết.</p>
+            </div>
+          </div>
+          <div className="table-wrapper">
+            <table className="simple-table">
+              <thead>
+                <tr>
+                  <th>Mã SV</th>
+                  <th>Họ tên</th>
+                  <th>Lớp</th>
+                  <th>Chuyên ngành</th>
+                  <th>Đúng giờ</th>
+                  <th>Đi trễ</th>
+                  <th>Vắng</th>
+                  <th>Tổng buổi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {adminAttendance.length === 0 ? (
+                  <tr><td colSpan="8">Chưa có dữ liệu điểm danh.</td></tr>
+                ) : adminAttendance.map((row) => (
+                  <tr key={row.studentId}>
+                    <td>{row.studentCode || '—'}</td>
+                    <td>{row.fullName || '—'}</td>
+                    <td>{row.className || '—'}</td>
+                    <td>{row.majorName || '—'}</td>
+                    <td><button type="button" className="btn outline small" onClick={() => openAttendanceDetail(row, 'PRESENT')}>{row.onTime}</button></td>
+                    <td><button type="button" className="btn outline small" onClick={() => openAttendanceDetail(row, 'LATE')}>{row.late}</button></td>
+                    <td><button type="button" className="btn outline small" onClick={() => openAttendanceDetail(row, 'ABSENT')}>{row.absent}</button></td>
+                    <td><button type="button" className="btn small" onClick={() => openAttendanceDetail(row, null)}>{row.total}</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {isAdmin && (
         <div className="card">
@@ -1169,12 +1170,12 @@ function CheckInPage() {
               </div>
             )}
             <div className="two-box-row">
-              <input type="date" value={adminForm.startDate} onChange={(e) => setAdminForm({ ...adminForm, startDate: e.target.value })} />
-              <input type="date" value={adminForm.endDate} onChange={(e) => setAdminForm({ ...adminForm, endDate: e.target.value })} />
+              <input type="date" min={today} value={adminForm.startDate} onChange={(e) => setAdminForm({ ...adminForm, startDate: e.target.value })} />
+              <input type="date" min={adminForm.startDate || today} value={adminForm.endDate} onChange={(e) => setAdminForm({ ...adminForm, endDate: e.target.value })} />
             </div>
             <div className="two-box-row">
-              <input type="text" placeholder="Giờ bắt đầu" value={adminForm.startTime} onChange={(e) => setAdminForm({ ...adminForm, startTime: e.target.value })} />
-              <input type="text" placeholder="Giờ kết thúc" value={adminForm.endTime} onChange={(e) => setAdminForm({ ...adminForm, endTime: e.target.value })} />
+              <input type="time" aria-label="Giờ bắt đầu" value={adminForm.startTime} onChange={(e) => setAdminForm({ ...adminForm, startTime: e.target.value })} />
+              <input type="time" aria-label="Giờ kết thúc" value={adminForm.endTime} onChange={(e) => setAdminForm({ ...adminForm, endTime: e.target.value })} />
             </div>
             <input placeholder="Địa điểm" value={adminForm.location} onChange={(e) => setAdminForm({ ...adminForm, location: e.target.value })} />
             <textarea rows="3" placeholder="Mô tả" value={adminForm.description} onChange={(e) => setAdminForm({ ...adminForm, description: e.target.value })} />
@@ -1192,14 +1193,43 @@ function CheckInPage() {
           <div className="form-stack">
             <input placeholder="Tiêu đề cuộc họp" value={adminForm.title} onChange={(e) => setAdminForm({ ...adminForm, title: e.target.value })} />
             <div className="two-box-row">
-              <input type="date" value={adminForm.meetingDate} onChange={(e) => setAdminForm({ ...adminForm, meetingDate: e.target.value })} />
-              <input type="text" placeholder="Giờ họp" value={adminForm.meetingTime} onChange={(e) => setAdminForm({ ...adminForm, meetingTime: e.target.value })} />
+              <input type="date" min={today} value={adminForm.meetingDate} onChange={(e) => setAdminForm({ ...adminForm, meetingDate: e.target.value })} />
+              <input type="time" aria-label="Giờ bắt đầu họp" value={adminForm.meetingTime} onChange={(e) => setAdminForm({ ...adminForm, meetingTime: e.target.value })} />
+              <input type="time" aria-label="Giờ kết thúc họp" value={adminForm.meetingEndTime} onChange={(e) => setAdminForm({ ...adminForm, meetingEndTime: e.target.value })} />
             </div>
             <input placeholder="Địa điểm" value={adminForm.location} onChange={(e) => setAdminForm({ ...adminForm, location: e.target.value })} />
             <textarea rows="3" placeholder="Agenda" value={adminForm.agenda} onChange={(e) => setAdminForm({ ...adminForm, agenda: e.target.value })} />
             <div className="button-row">
               <button className="btn" type="button" onClick={() => handleAdminSave('meeting')}>Lưu cuộc họp</button>
               <button className="btn outline" type="button" onClick={() => setAdminForm(initialAdminForm)}>Xóa form</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {attendanceDetail && (
+        <div className="modal-backdrop" onClick={() => setAttendanceDetail(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Chi tiết điểm danh — {attendanceDetail.student?.fullName}</h3>
+              <button type="button" className="modal-close" onClick={() => setAttendanceDetail(null)}>×</button>
+            </div>
+            <div className="table-wrapper">
+              <table className="simple-table">
+                <thead>
+                  <tr><th>Ngày</th><th>Trạng thái</th><th>Check-in</th><th>Check-out</th></tr>
+                </thead>
+                <tbody>
+                  {attendanceDetail.records?.length ? attendanceDetail.records.map((record) => (
+                    <tr key={record.id}>
+                      <td>{record.date}</td>
+                      <td>{record.status === 'PRESENT' ? 'Đúng giờ' : record.status === 'LATE' ? 'Đi trễ' : 'Vắng'}</td>
+                      <td>{record.time || '—'}</td>
+                      <td>{record.checkOutTime || '—'}</td>
+                    </tr>
+                  )) : <tr><td colSpan="4">Không có buổi phù hợp.</td></tr>}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

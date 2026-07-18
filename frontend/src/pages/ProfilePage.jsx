@@ -390,8 +390,7 @@ function ProfilePage() {
     try {
       const payload = {
         fullName: form.fullName || profile?.fullName || '',
-        phoneNumber: form.phoneNumber || profile?.phoneNumber || '',
-        studentCode: form.studentCode || profile?.studentCode || '',
+        phoneNumber: form.phoneNumber,
         headline: form.roleHeadline || profile?.headline || '',
         linkedin: form.linkedin || profile?.linkedin || '',
         university: form.university || profile?.university || '',
@@ -403,8 +402,8 @@ function ProfilePage() {
         mentorName: form.mentorName || profile?.mentorName || '',
         address: form.address || profile?.address || '',
         bio: form.bio || profile?.bio || '',
-        emergencyContact: form.emergencyContact || profile?.emergencyContact || '',
-        emergencyPhone: form.emergencyPhone || profile?.emergencyPhone || '',
+        emergencyContact: form.emergencyContact,
+        emergencyPhone: form.emergencyPhone,
         periodId: form.periodId || profile?.periodId || null,
       };
 
@@ -581,11 +580,18 @@ function ProfilePage() {
                     </label>
                     <label className="profile-field">
                       <span>Số điện thoại</span>
-                      <input name="phoneNumber" value={form.phoneNumber} onChange={handleChange} />
+                      <input
+                        name="phoneNumber"
+                        inputMode="numeric"
+                        pattern="[0-9]{8,15}"
+                        value={form.phoneNumber}
+                        onChange={(e) => setForm((current) => ({ ...current, phoneNumber: e.target.value.replace(/\D/g, '') }))}
+                      />
                     </label>
                     <label className="profile-field">
                       <span>Mã sinh viên</span>
-                      <input name="studentCode" value={form.studentCode} onChange={handleChange} />
+                      <input name="studentCode" value={form.studentCode} readOnly disabled />
+                      <small>Mã sinh viên được hệ thống tạo tự động</small>
                     </label>
                     <label className="profile-field">
                       <span>Vai trò / Tiêu đề</span>
@@ -647,7 +653,13 @@ function ProfilePage() {
                     </label>
                     <label className="profile-field">
                       <span>SĐT liên hệ</span>
-                      <input name="emergencyPhone" value={form.emergencyPhone} onChange={handleChange} />
+                      <input
+                        name="emergencyPhone"
+                        inputMode="numeric"
+                        pattern="[0-9]{8,15}"
+                        value={form.emergencyPhone}
+                        onChange={(e) => setForm((current) => ({ ...current, emergencyPhone: e.target.value.replace(/\D/g, '') }))}
+                      />
                     </label>
                     <label className="profile-field">
                       <span>Doanh nghiệp / Đơn vị</span>
@@ -894,7 +906,7 @@ function ProfilePage() {
                   <p className="settings-label">Email khôi phục</p>
                   <p className="settings-value">{profile?.recoveryEmail || profile?.email || 'Chưa cập nhật'}</p>
                 </div>
-                <button className="btn outline small" type="button">Thay đổi</button>
+                <button className="btn outline small" type="button" disabled title="Tính năng đang phát triển">Thay đổi</button>
               </div>
               <div className="settings-row">
                 <div className="settings-icon">🔒</div>
@@ -905,7 +917,7 @@ function ProfilePage() {
                     <p className="settings-value">{profile?.twoFactorEnabled ? 'Đã kích hoạt' : 'Chưa kích hoạt'}</p>
                   </div>
                 </div>
-                <button className="btn outline small" type="button">Thiết lập</button>
+                <button className="btn outline small" type="button" disabled title="Tính năng đang phát triển">Thiết lập</button>
               </div>
               <div className="settings-row">
                 <div className="settings-icon">🔑</div>

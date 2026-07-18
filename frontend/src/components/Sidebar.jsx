@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import './Sidebar.css';
 import { getUnreadCount } from '../services/notificationService';
+import { getChatUnreadCount } from '../services/chatService';
 
 function Sidebar() {
   const storedUser = localStorage.getItem('user');
@@ -31,16 +32,18 @@ function Sidebar() {
   const navItems = [
     { to: '/', icon: '🏠', label: 'Tổng quan' },
     { to: '/dashboard', icon: '📊', label: 'Dashboard', adminOnly: true },
-    { to: '/profile', icon: '👤', label: 'Hồ sơ cá nhân' },
-    { to: '/internship-info', icon: '📚', label: 'Thông tin thực tập' },
+    { to: '/profile', icon: '👤', label: 'Hồ sơ cá nhân', roles: ['STUDENT', 'ENTERPRISE'] },
+    { to: '/internship-info', icon: '📚', label: 'Thông tin thực tập', roles: ['STUDENT', 'ENTERPRISE'] },
     { to: '/checkin', icon: '✅', label: 'Check-in & Lịch họp' },
     { to: '/tasks', icon: '📌', label: 'Nhiệm vụ' },
-    { to: '/goals', icon: '🎯', label: 'Mục tiêu thực tập' },
+    { to: '/goals', icon: '🎯', label: 'Mục tiêu thực tập', roles: ['STUDENT'] },
     { to: '/reports', icon: '📝', label: 'Báo cáo' },
     { to: '/evaluations', icon: '⭐', label: 'Đánh giá', comingSoon: true },
     { to: '/badges', icon: '🏅', label: 'Huy hiệu', comingSoon: true },
     { to: '/certificates', icon: '🎓', label: 'Chứng nhận', comingSoon: true },
+    { to: '/chat', icon: '💬', label: 'Tin nhắn', roles: ['STUDENT', 'ENTERPRISE'] },
     { to: '/notifications', icon: '🔔', label: 'Thông báo' },
+    { to: '/mentors', icon: '🧑‍🏫', label: 'Quản lý mentor', roles: ['ADMIN', 'ENTERPRISE'] },
     { to: '/students', icon: '🎓', label: 'Quản lý sinh viên', adminOnly: true },
     { to: '/majors', icon: '📚', label: 'Quản lý chuyên ngành', adminOnly: true },
     { to: '/periods/new', icon: '➕', label: 'Tạo kỳ thực tập', adminOnly: true },
@@ -61,6 +64,7 @@ function Sidebar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const avatarRef = useRef(null);
   const [unread, setUnread] = useState(0);
+  const [chatUnread, setChatUnread] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -71,11 +75,24 @@ function Sidebar() {
       } catch (e) {
         // ignore
       }
+      if (['STUDENT', 'ENTERPRISE'].includes(userRole)) {
+        try {
+          const c = await getChatUnreadCount();
+          if (mounted) setChatUnread(c);
+        } catch (e) {
+          // ignore
+        }
+      }
     };
     load();
     const id = setInterval(load, 30_000);
-    return () => { mounted = false; clearInterval(id); };
-  }, []);
+    window.addEventListener('chat:unread-changed', load);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+      window.removeEventListener('chat:unread-changed', load);
+    };
+  }, [userRole]);
 
   useEffect(() => {
     const onDoc = (e) => {
@@ -101,6 +118,9 @@ function Sidebar() {
       <div className="sidebar-top">
         {navItems.map((item) => {
           if (item.adminOnly && userRole !== 'ADMIN') {
+            return null;
+          }
+          if (item.roles && !item.roles.includes(userRole)) {
             return null;
           }
           if (item.comingSoon && !showComing) {
@@ -130,7 +150,11 @@ function Sidebar() {
               title={item.label}
             >
               <span className="icon">{item.icon}</span>
-              <span className="label">{item.label}{item.to === '/notifications' && unread > 0 ? <span className="badge">{unread}</span> : null}</span>
+              <span className="label">
+                {item.label}
+                {item.to === '/notifications' && unread > 0 ? <span className="badge">{unread}</span> : null}
+                {item.to === '/chat' && chatUnread > 0 ? <span className="badge">{chatUnread}</span> : null}
+              </span>
             </NavLink>
           );
         })}

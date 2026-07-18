@@ -83,27 +83,25 @@ const createTask = async (data) => {
     }
 
     if (!internshipId) {
-        // create a default internship assignment for the student if possible
-        let position = await Internship.findOne({ where: { name: 'Chưa phân công' } }).catch(() => null);
-        // The project uses a separate Position model; create/find that
+        if (!student.periodId) {
+            throw new Error('Sinh viên chưa được gán đợt thực tập');
+        }
+        if (!student.mentorId) {
+            throw new Error('Sinh viên chưa được phân công mentor');
+        }
+        const mentor = await Mentor.findByPk(student.mentorId);
+        if (!mentor || Number(mentor.userId) === Number(student.userId)) {
+            throw new Error('Mentor được phân công không hợp lệ');
+        }
         const Position = require('../models/position');
-        position = await Position.findOne({ where: { name: 'Chưa phân công' } });
+        let position = await Position.findOne({ where: { name: 'Chưa phân công' } });
         if (!position) {
             position = await Position.create({ name: 'Chưa phân công', description: 'Vị trí mặc định cho sinh viên chưa phân công' });
         }
 
-        // find or create a mentor placeholder
-        let mentor = null;
-        if (student.userId) {
-            mentor = await Mentor.findOne({ where: { userId: student.userId } });
-        }
-        if (!mentor) {
-            mentor = await Mentor.create({ fullName: 'Chưa phân công', companyName: 'Chưa phân công', userId: student.userId });
-        }
-
         const createdInternship = await Internship.create({
             studentId: student.id,
-            periodId: data.periodId || student.periodId || null,
+            periodId: data.periodId || student.periodId,
             positionId: position.id,
             mentorId: mentor.id,
             status: 'IN_PROGRESS'

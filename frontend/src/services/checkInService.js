@@ -40,3 +40,17 @@ export const getMyCheckIns = async () => {
   }
   return res.data;
 };
+
+export const getAdminCheckInSummary = async (periodId) => {
+  const res = await apiClient.get('/checkins/admin/summary', {
+    params: periodId ? { periodId } : undefined,
+  });
+  return res.data?.data || [];
+};
+
+export const getAdminCheckInDetail = async ({ studentId, status, periodId }) => {
+  const res = await apiClient.get('/checkins/admin/detail', {
+    params: { studentId, status, periodId: periodId || undefined },
+  });
+  return res.data?.data || { student: null, records: [] };
+};

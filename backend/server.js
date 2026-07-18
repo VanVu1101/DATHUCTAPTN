@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const http = require('http');
+const { Server } = require('socket.io');
 const { DataTypes } = require('sequelize');
 
 // 1. Import config và models
@@ -23,11 +25,25 @@ const Notification = require('./src/models/notification');
 const CheckIn = require('./src/models/checkIn');
 const Schedule = require('./src/models/schedule');
 const Meeting = require('./src/models/meeting');
+const ChatConversation = require('./src/models/chatConversation');
+const ChatMessage = require('./src/models/chatMessage');
 
 const app = express();
+const httpServer = http.createServer(app);
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim());
+const io = new Server(httpServer, {
+    cors: {
+        origin: allowedOrigins,
+        credentials: true
+    }
+});
+app.set('io', io);
+require('./src/sockets/chat.socket')(io);
 
 // Middlewares cơ bản
-app.use(cors());
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -45,6 +61,8 @@ Student.belongsTo(InternshipPeriod, { foreignKey: 'periodId' });
 // Mentor liên kết với User
 User.hasOne(Mentor, { foreignKey: 'userId' });
 Mentor.belongsTo(User, { foreignKey: 'userId' });
+User.hasMany(Mentor, { foreignKey: 'ownerUserId', as: 'ManagedMentors' });
+Mentor.belongsTo(User, { foreignKey: 'ownerUserId', as: 'Owner' });
 
 // Thiết lập quan hệ cho bảng Phân công (Internships)
 Student.hasMany(Internship, { foreignKey: 'studentId' });
@@ -106,6 +124,20 @@ PeriodDocument.belongsTo(InternshipPeriod, { foreignKey: 'periodId' });
 Student.hasMany(StudentDocument, { foreignKey: 'studentId' });
 StudentDocument.belongsTo(Student, { foreignKey: 'studentId' });
 
+// --- QUAN HỆ CHAT REALTIME ---
+Internship.hasOne(ChatConversation, { foreignKey: 'internshipId' });
+ChatConversation.belongsTo(Internship, { foreignKey: 'internshipId' });
+
+ChatConversation.hasMany(ChatMessage, { foreignKey: 'conversationId', onDelete: 'CASCADE' });
+ChatMessage.belongsTo(ChatConversation, { foreignKey: 'conversationId' });
+
+User.hasMany(ChatConversation, { foreignKey: 'studentUserId', as: 'StudentConversations' });
+ChatConversation.belongsTo(User, { foreignKey: 'studentUserId', as: 'StudentUser' });
+User.hasMany(ChatConversation, { foreignKey: 'mentorUserId', as: 'MentorConversations' });
+ChatConversation.belongsTo(User, { foreignKey: 'mentorUserId', as: 'MentorUser' });
+User.hasMany(ChatMessage, { foreignKey: 'senderId', as: 'SentChatMessages' });
+ChatMessage.belongsTo(User, { foreignKey: 'senderId', as: 'Sender' });
+
 // --- ĐĂNG KÝ CÁC ROUTES ---
 const authRoutes = require('./src/routes/auth');
 const studentRoutes = require('./src/routes/student');
@@ -119,6 +151,8 @@ const scheduleRoutes = require('./src/routes/schedule');
 const meetingRoutes = require('./src/routes/meeting');
 const evaluationRoutes = require('./src/routes/evaluation');
 const notificationRoutes = require('./src/routes/notification');
+const chatRoutes = require('./src/routes/chat');
+const mentorRoutes = require('./src/routes/mentor');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
@@ -132,6 +166,8 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/evaluations', evaluationRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/mentors', mentorRoutes);
 
 // 2. Đồng bộ Database an toàn: tạo bảng mới nếu chưa có, và bổ sung cột thiếu cho bảng tasks
 const ensureTaskTableColumns = async () => {
@@ -264,6 +300,59 @@ const ensureNotificationTableColumns = async () => {
     }
 };
 
+const ensureMentorTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const mentorTable = await queryInterface.describeTable('mentors').catch(() => null);
+        if (mentorTable && !mentorTable.ownerUserId) {
+            await queryInterface.addColumn('mentors', 'ownerUserId', {
+                type: DataTypes.INTEGER,
+                allowNull: true
+            });
+            console.log('✅ Đã thêm cột ownerUserId vào bảng mentors');
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi bổ sung bảng mentors:', error);
+    }
+};
+
+const ensureWeeklyReportTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const table = await queryInterface.describeTable('weekly_reports').catch(() => null);
+        if (!table) return;
+        if (!table.attachmentUrl) {
+            await queryInterface.addColumn('weekly_reports', 'attachmentUrl', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+        if (!table.attachmentName) {
+            await queryInterface.addColumn('weekly_reports', 'attachmentName', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi bổ sung bảng weekly_reports:', error);
+    }
+};
+
+const ensureMeetingTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const table = await queryInterface.describeTable('meetings').catch(() => null);
+        if (table && !table.endTime) {
+            await queryInterface.addColumn('meetings', 'endTime', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi bổ sung bảng meetings:', error);
+    }
+};
+
 sequelize.sync()
     .then(async () => {
         await ensureTaskTableColumns();
@@ -271,12 +360,15 @@ sequelize.sync()
         await ensureReportTableColumns();
         await ensureEvaluationTableColumns();
         await ensureNotificationTableColumns();
+        await ensureMentorTableColumns();
+        await ensureWeeklyReportTableColumns();
+        await ensureMeetingTableColumns();
         console.log('✅ Đã đồng bộ các bảng trong MySQL!');
     })
     .catch(err => console.error('❌ Lỗi đồng bộ bảng:', err));
 
 // 3. Khởi chạy Server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
 });

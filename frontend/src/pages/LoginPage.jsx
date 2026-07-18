@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login, register, requestPasswordReset } from '../services/authService';
-import { getMyProfile } from '../services/studentService';
+import { getMyProfile, persistProfile } from '../services/studentService';
 import '../App.css';
 
 function LoginPage() {
@@ -13,6 +13,18 @@ function LoginPage() {
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  const storeAuthUser = (authUser, displayName) => {
+    const baseUser = {
+      ...(authUser || {}),
+      id: authUser?.id,
+      userId: authUser?.id,
+      name: displayName,
+      fullName: authUser?.fullName || displayName,
+    };
+    localStorage.setItem('user', JSON.stringify(baseUser));
+    return baseUser;
   };
 
   const handleSubmit = async (e) => {
@@ -39,16 +51,14 @@ function LoginPage() {
         const res = await register({ email: form.email, password: form.password, role: form.role });
           if (res && res.success && res.data && res.data.token) {
             localStorage.setItem('token', res.data.token);
-            // fetch profile to get full user info
+            storeAuthUser(res.data.user || { email: form.email, role: form.role }, displayName);
             try {
               const prof = await getMyProfile();
               if (prof && prof.success) {
-                localStorage.setItem('user', JSON.stringify(prof.data));
-              } else {
-                localStorage.setItem('user', JSON.stringify({ ...(res.data.user || { email: form.email, role: form.role }), name: displayName }));
+                persistProfile(prof.data);
               }
             } catch (e) {
-              localStorage.setItem('user', JSON.stringify({ ...(res.data.user || { email: form.email, role: form.role }), name: displayName }));
+              // Keep auth user from login/register response.
             }
             setMessage('Đăng ký thành công');
             navigate('/dashboard');
@@ -65,16 +75,14 @@ function LoginPage() {
       const res = await login({ email: form.email, password: form.password });
       if (res && res.success && res.data && res.data.token) {
         localStorage.setItem('token', res.data.token);
-        // fetch profile to obtain display name and profile details
+        storeAuthUser(res.data.user || { email: form.email, role: 'STUDENT' }, displayName);
         try {
           const prof = await getMyProfile();
           if (prof && prof.success) {
-            localStorage.setItem('user', JSON.stringify(prof.data));
-          } else {
-            localStorage.setItem('user', JSON.stringify({ ...(res.data.user || { email: form.email, role: 'STUDENT' }), name: displayName }));
+            persistProfile(prof.data);
           }
         } catch (e) {
-          localStorage.setItem('user', JSON.stringify({ ...(res.data.user || { email: form.email, role: 'STUDENT' }), name: displayName }));
+          // Keep auth user from login response.
         }
         setMessage('Đăng nhập thành công');
         navigate('/dashboard');

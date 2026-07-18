@@ -33,4 +33,31 @@ const getMyCheckIns = async (req, res) => {
     }
 };
 
-module.exports = { submitCheckIn, submitCheckOut, getMyCheckIns };
+const getAdminSummary = async (req, res) => {
+    try {
+        const data = await checkInService.getAdminSummary(req.query.periodId || null);
+        res.json({ success: true, data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const getAdminDetail = async (req, res) => {
+    try {
+        if (!req.query.studentId) {
+            return res.status(400).json({ success: false, message: 'Thiếu studentId' });
+        }
+        const data = await checkInService.getAdminDetail(req.query);
+        res.json({ success: true, data });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+module.exports = {
+    submitCheckIn,
+    submitCheckOut,
+    getMyCheckIns,
+    getAdminSummary,
+    getAdminDetail
+};

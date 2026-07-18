@@ -26,6 +26,8 @@ import CertificatesPage from './pages/CertificatesPage.jsx';
 import NotificationsPage from './pages/NotificationsPage.jsx';
 import FinalReportPage from './pages/FinalReportPage.jsx';
 import ProfileUploadPage from './pages/ProfileUploadPage.jsx';
+import ChatPage from './pages/ChatPage.jsx';
+import MentorManagementPage from './pages/MentorManagementPage.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 createRoot(document.getElementById('root')).render(
@@ -43,15 +45,25 @@ createRoot(document.getElementById('root')).render(
               <Route path="tasks" element={<TasksPage />} />
               <Route path="students" element={<StudentManagementPage />} />
               <Route path="majors" element={<MajorManagementPage />} />
-              <Route path="profile" element={<ProfilePage />} />
-              <Route path="profile/upload" element={<ProfileUploadPage />} />
-              <Route path="profile/history" element={<LoginHistoryPage />} />
-              <Route path="internship-info" element={<InternshipInfo />} />
-              <Route path="goals" element={<GoalsPage />} />
+              <Route element={<ProtectedRoute allowedRoles={['STUDENT', 'ENTERPRISE']} />}>
+                <Route path="profile" element={<ProfilePage />} />
+                <Route path="profile/upload" element={<ProfileUploadPage />} />
+                <Route path="profile/history" element={<LoginHistoryPage />} />
+                <Route path="internship-info" element={<InternshipInfo />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['STUDENT']} />}>
+                <Route path="goals" element={<GoalsPage />} />
+              </Route>
               <Route path="evaluations" element={<EvaluationsPage />} />
               <Route path="badges" element={<BadgesPage />} />
               <Route path="certificates" element={<CertificatesPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
+              <Route element={<ProtectedRoute allowedRoles={['STUDENT', 'ENTERPRISE']} />}>
+                <Route path="chat" element={<ChatPage />} />
+              </Route>
+              <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'ENTERPRISE']} />}>
+                <Route path="mentors" element={<MentorManagementPage />} />
+              </Route>
               <Route path="final-report" element={<FinalReportPage />} />
               <Route path="periods" element={<InternshipPeriodsPage />} />
               <Route path="periods/new" element={<InternshipPeriodsPage />} />

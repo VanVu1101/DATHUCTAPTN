@@ -4,9 +4,14 @@ export const persistProfile = (profile) => {
   if (!profile) return null;
   try {
     const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const authUserId = profile.userId || currentUser.userId || currentUser.id || null;
     const nextUser = {
       ...currentUser,
       ...profile,
+      // Keep users.id for auth/chat even when profile.id is the student PK.
+      userId: authUserId,
+      id: authUserId,
+      studentId: profile.id || currentUser.studentId || null,
       profileImageUrl: profile.profileImageUrl || profile.avatar || currentUser.profileImageUrl || currentUser.avatar || '',
       avatar: profile.avatar || profile.profileImageUrl || currentUser.avatar || currentUser.profileImageUrl || '',
       fullName: profile.fullName || currentUser.fullName || currentUser.name || '',

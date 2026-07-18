@@ -52,6 +52,16 @@ export const createWeeklyReport = async (payload) => {
   return res.data;
 };
 
+export const updateWeeklyReport = async (id, payload) => {
+  const res = await apiClient.put(`/reports/weekly-reports/${id}`, payload);
+  return res.data;
+};
+
+export const deleteWeeklyReport = async (id) => {
+  const res = await apiClient.delete(`/reports/weekly-reports/${id}`);
+  return res.data;
+};
+
 export const createAdminReport = async (payload) => {
   const res = await apiClient.post('/reports/admin', payload);
   return res.data;

@@ -1,7 +1,14 @@
 import '../App.css';
 import { useEffect, useMemo, useState } from 'react';
-import { getStudents, createStudent, updateStudent, deleteStudent } from '../services/studentService';
+import {
+  getStudents,
+  createStudent,
+  updateStudent,
+  deleteStudent,
+  assignStudentMentor,
+} from '../services/studentService';
 import { getAllPeriods } from '../services/periodService';
+import { getMentors } from '../services/mentorService';
 
 const initialForm = {
   studentCode: '',
@@ -10,6 +17,7 @@ const initialForm = {
   majorName: '',
   enterpriseName: '',
   mentorName: '',
+  mentorId: '',
   periodId: '',
   status: 'ACTIVE'
 };
@@ -25,6 +33,7 @@ function StudentManagementPage() {
   const [user, setUser] = useState(null);
   const [students, setStudents] = useState([]);
   const [periods, setPeriods] = useState([]);
+  const [mentors, setMentors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
@@ -49,17 +58,19 @@ function StudentManagementPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [studentsRes, periodsRes] = await Promise.all([
+      const [studentsRes, periodsRes, mentorItems] = await Promise.all([
         getStudents({
           status: filterStatus === 'ALL' ? undefined : filterStatus,
           periodId: filterPeriod || undefined,
           search: search || undefined
         }),
-        getAllPeriods()
+        getAllPeriods(),
+        getMentors(),
       ]);
 
       setStudents(Array.isArray(studentsRes) ? studentsRes : studentsRes.data || []);
       setPeriods(Array.isArray(periodsRes) ? periodsRes : periodsRes.data || []);
+      setMentors(mentorItems);
     } catch (error) {
       setMessage(error.response?.data?.message || 'Không tải được danh sách sinh viên.');
     } finally {
@@ -83,6 +94,7 @@ function StudentManagementPage() {
       majorName: student.majorName || '',
       enterpriseName: student.enterpriseName || '',
       mentorName: student.mentorName || '',
+      mentorId: student.mentorId ? String(student.mentorId) : '',
       periodId: student.periodId ? String(student.periodId) : '',
       status: student.status || 'ACTIVE'
     });
@@ -112,13 +124,15 @@ function StudentManagementPage() {
         className: form.className,
         majorName: form.majorName,
         enterpriseName: form.enterpriseName,
-        mentorName: form.mentorName,
         periodId: form.periodId ? Number(form.periodId) : null,
         status: form.status
       };
 
       if (editingStudent) {
         await updateStudent(editingStudent.id, payload);
+        if (form.mentorId) {
+          await assignStudentMentor(editingStudent.id, Number(form.mentorId));
+        }
         setMessage('Đã cập nhật sinh viên.');
       } else {
         await createStudent(payload);
@@ -271,7 +285,14 @@ function StudentManagementPage() {
                 </label>
                 <label className="profile-field">
                   <span>Mentor</span>
-                  <input name="mentorName" value={form.mentorName} onChange={handleChange} />
+                  <select name="mentorId" value={form.mentorId} onChange={handleChange}>
+                    <option value="">Chưa phân công</option>
+                    {mentors.map((mentor) => (
+                      <option key={mentor.id} value={mentor.id}>
+                        {mentor.fullName} — {mentor.companyName}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="profile-field">
                   <span>Kỳ thực tập</span>

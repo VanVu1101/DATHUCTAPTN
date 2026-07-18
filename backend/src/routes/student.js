@@ -23,7 +23,7 @@ router.get('/:id', checkRole(['ADMIN']), studentController.getStudentById);
 router.post('/', checkRole(['ADMIN']), studentController.createStudent);
 router.put('/:id', checkRole(['ADMIN']), studentController.updateStudent);
 router.put('/:id/assign-period', checkRole(['ADMIN']), studentController.assignStudentPeriod);
-router.put('/:id/assign-mentor', checkRole(['ADMIN']), studentController.assignStudentMentor);
+router.put('/:id/assign-mentor', checkRole(['ADMIN', 'ENTERPRISE']), studentController.assignStudentMentor);
 router.delete('/:id', checkRole(['ADMIN', 'ENTERPRISE']), studentController.deleteStudent);
 
 module.exports = router;

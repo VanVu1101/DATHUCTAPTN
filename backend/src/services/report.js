@@ -42,16 +42,12 @@ const ensureStudentInternship = async (student, periodId = null) => {
         position = await Position.create({ name: 'Chưa phân công', description: 'Vị trí mặc định cho sinh viên chưa phân công' });
     }
 
-    let mentor = null;
-    if (student.userId) {
-        mentor = await Mentor.findOne({ where: { userId: student.userId } });
+    if (!student.mentorId) {
+        throw new Error('Sinh viên chưa được phân công mentor.');
     }
-    if (!mentor) {
-        mentor = await Mentor.create({
-            fullName: 'Chưa phân công',
-            companyName: 'Chưa phân công',
-            userId: student.userId
-        });
+    const mentor = await Mentor.findByPk(student.mentorId);
+    if (!mentor || Number(mentor.userId) === Number(student.userId)) {
+        throw new Error('Mentor được phân công không hợp lệ.');
     }
 
     return Internship.create({
@@ -68,6 +64,14 @@ const createWeeklyReport = async (data) => {
     if (!data.weekNumber) throw new Error('weekNumber is required');
     if (!data.title) throw new Error('title is required');
     if (!data.description) throw new Error('description is required');
+    if (data.dueDate) {
+        const today = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Ho_Chi_Minh'
+        }).format(new Date());
+        if (String(data.dueDate).slice(0, 10) < today) {
+            throw new Error('Hạn nộp không được nhỏ hơn ngày hiện tại');
+        }
+    }
 
     const period = await InternshipPeriod.findByPk(data.periodId);
     if (!period) throw new Error('Không tìm thấy đợt thực tập này!');
@@ -81,6 +85,40 @@ const createWeeklyReport = async (data) => {
     }
 
     return WeeklyReport.create(data);
+};
+
+const updateWeeklyReport = async (id, data) => {
+    const weeklyReport = await WeeklyReport.findByPk(id);
+    if (!weeklyReport) throw new Error('Không tìm thấy tuần báo cáo');
+    if (data.dueDate) {
+        const today = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Ho_Chi_Minh'
+        }).format(new Date());
+        if (String(data.dueDate).slice(0, 10) < today) {
+            throw new Error('Hạn nộp không được nhỏ hơn ngày hiện tại');
+        }
+    }
+    return weeklyReport.update({
+        periodId: data.periodId ?? weeklyReport.periodId,
+        weekNumber: data.weekNumber ?? weeklyReport.weekNumber,
+        title: data.title ?? weeklyReport.title,
+        description: data.description ?? weeklyReport.description,
+        dueDate: data.dueDate ?? weeklyReport.dueDate,
+        attachmentUrl: data.attachmentUrl ?? weeklyReport.attachmentUrl,
+        attachmentName: data.attachmentName ?? weeklyReport.attachmentName,
+        status: data.status ?? weeklyReport.status
+    });
+};
+
+const deleteWeeklyReport = async (id) => {
+    const weeklyReport = await WeeklyReport.findByPk(id);
+    if (!weeklyReport) throw new Error('Không tìm thấy tuần báo cáo');
+    const submissions = await Report.count({ where: { weeklyReportId: id } });
+    if (submissions > 0) {
+        throw new Error('Không thể xóa tuần đã có sinh viên nộp báo cáo');
+    }
+    await weeklyReport.destroy();
+    return true;
 };
 
 const getWeeklyReports = async (periodId = null) => {
@@ -405,6 +443,8 @@ const deleteReport = async (id) => {
 
 module.exports = {
     createWeeklyReport,
+    updateWeeklyReport,
+    deleteWeeklyReport,
     getWeeklyReports,
     getWeeklyReportsForUser,
     getReports,

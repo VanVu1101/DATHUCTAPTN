@@ -4,6 +4,10 @@ const User = require('../models/user');
 const Major = require('../models/major');
 const InternshipPeriod = require('../models/internshipPeriod');
 const Mentor = require('../models/mentor');
+const Internship = require('../models/internship');
+const Position = require('../models/position');
+const ChatConversation = require('../models/chatConversation');
+const sequelize = require('../config/database');
 const StudentDocument = require('../models/studentDocument');
 const { uploadFile, deleteFile } = require('../config/s3');
 const reportService = require('./report');
@@ -17,7 +21,7 @@ const ensureDefaultMajor = async () => {
     return major;
 };
 
-const buildStudentCode = (userId) => `SV${String(userId).padStart(4, '0')}${Date.now().toString().slice(-4)}`;
+const buildStudentCode = (userId) => `SV${String(userId).padStart(5, '0')}`;
 
 const formatInternshipDuration = (period) => {
     if (!period?.startDate || !period?.endDate) return '';
@@ -36,6 +40,7 @@ const formatInternshipDuration = (period) => {
 
 const buildProfilePayload = (student, user, options = {}) => ({
     id: student?.id || null,
+    userId: user?.id || null,
     studentCode: student?.studentCode || '',
     fullName: student?.fullName || user?.email?.split('@')[0] || 'Sinh viên',
     className: student?.className || '',
@@ -166,6 +171,14 @@ const getMyProfile = async (userId) => {
 
 const updateMyProfile = async (userId, payload) => {
     try {
+        const validatePhone = (value, label) => {
+            if (value !== undefined && value !== '' && !/^\d{8,15}$/.test(String(value))) {
+                throw new Error(`${label} chỉ được gồm 8–15 chữ số`);
+            }
+        };
+        validatePhone(payload.phoneNumber, 'Số điện thoại');
+        validatePhone(payload.emergencyPhone, 'Số điện thoại liên hệ gấp');
+
         let student = await Student.findOne({ where: { userId } });
         const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role', 'profileImageUrl'] });
 
@@ -224,9 +237,9 @@ const updateMyProfile = async (userId, payload) => {
             studentCode: payload.studentCode
         });
 
-        const normalizeField = (value, fallback) => (value === undefined || value === '' ? fallback : value);
+        const normalizeField = (value, fallback) => (value === undefined ? fallback : value);
 
-        const updatedStudent = await student.update({
+        await student.update({
             fullName: normalizeField(payload.fullName, student.fullName),
             className: normalizeField(payload.className, student.className),
             majorName: normalizeField(payload.majorName, student.majorName),
@@ -238,7 +251,7 @@ const updateMyProfile = async (userId, payload) => {
             linkedin: normalizeField(payload.linkedin, student.linkedin),
             university: normalizeField(payload.university, student.university),
             groupName: normalizeField(payload.groupName, student.groupName),
-            birthDate: normalizeField(payload.birthDate, student.birthDate),
+            birthDate: payload.birthDate === '' ? null : normalizeField(payload.birthDate, student.birthDate),
             headline: normalizeField(payload.headline, student.headline),
             emergencyContact: normalizeField(payload.emergencyContact, student.emergencyContact),
             emergencyPhone: normalizeField(payload.emergencyPhone, student.emergencyPhone),
@@ -248,14 +261,10 @@ const updateMyProfile = async (userId, payload) => {
             languages: normalizeField(payload.languages, student.languages),
             majorId: payload.majorId || student.majorId,
             periodId: payload.periodId === undefined || payload.periodId === '' ? student.periodId : payload.periodId,
-            studentCode: normalizeField(payload.studentCode, student.studentCode)
+            studentCode: student.studentCode || buildStudentCode(userId)
         });
 
-        const studentWithRelations = await Student.findByPk(updatedStudent.id, {
-            include: [{ model: InternshipPeriod, attributes: ['id', 'name', 'startDate', 'endDate'] }]
-        });
-
-        return buildProfilePayload(studentWithRelations || updatedStudent, user);
+        return getMyProfile(userId);
     } catch (error) {
         console.error('updateMyProfile error details:', {
             message: error.message,
@@ -411,6 +420,75 @@ const updateStudent = async (id, data) => {
     return await student.update(data);
 };
 
+const assignMentor = async (studentId, mentorId, actor) => {
+    return sequelize.transaction(async (transaction) => {
+        const student = await Student.findByPk(studentId, { transaction });
+        if (!student) throw new Error('Không tìm thấy sinh viên');
+        if (!student.periodId) throw new Error('Sinh viên chưa được gán đợt thực tập');
+
+        const mentor = await Mentor.findByPk(mentorId, { transaction });
+        if (!mentor) throw new Error('Không tìm thấy mentor');
+        if (actor.role === 'ENTERPRISE' && Number(mentor.ownerUserId) !== Number(actor.id)) {
+            throw new Error('Bạn chỉ được phân công mentor thuộc doanh nghiệp của mình');
+        }
+        if (
+            actor.role === 'ENTERPRISE'
+            && String(student.enterpriseName || '').trim().toLowerCase()
+                !== String(mentor.companyName || '').trim().toLowerCase()
+        ) {
+            throw new Error('Sinh viên chưa được gán cho doanh nghiệp của bạn');
+        }
+
+        const mentorUser = await User.findByPk(mentor.userId, { transaction });
+        if (!mentorUser || mentorUser.role !== 'ENTERPRISE') {
+            throw new Error('Mentor chưa có tài khoản ENTERPRISE hợp lệ');
+        }
+
+        let internship = await Internship.findOne({
+            where: {
+                studentId: student.id,
+                periodId: student.periodId,
+                status: { [Op.in]: ['PENDING', 'IN_PROGRESS'] }
+            },
+            order: [['updatedAt', 'DESC']],
+            transaction
+        });
+
+        const oldMentorId = internship?.mentorId;
+        if (!internship) {
+            const [position] = await Position.findOrCreate({
+                where: { name: 'Chưa phân công' },
+                defaults: { description: 'Vị trí mặc định' },
+                transaction
+            });
+            internship = await Internship.create({
+                studentId: student.id,
+                periodId: student.periodId,
+                positionId: position.id,
+                mentorId: mentor.id,
+                status: 'IN_PROGRESS'
+            }, { transaction });
+        } else {
+            await internship.update({ mentorId: mentor.id }, { transaction });
+        }
+
+        await student.update({
+            mentorId: mentor.id,
+            mentorName: mentor.fullName,
+            enterpriseName: mentor.companyName
+        }, { transaction });
+
+        if (oldMentorId && Number(oldMentorId) !== Number(mentor.id)) {
+            await ChatConversation.update(
+                { status: 'ARCHIVED' },
+                { where: { internshipId: internship.id, status: 'ACTIVE' }, transaction }
+            );
+        }
+
+        return student;
+    });
+};
+
 const deleteStudent = async (id) => {
     const student = await Student.findByPk(id);
     if (!student) throw new Error('Không tìm thấy sinh viên');
@@ -430,5 +508,6 @@ module.exports = {
     getStudentById,
     createStudent,
     updateStudent,
+    assignMentor,
     deleteStudent
 };

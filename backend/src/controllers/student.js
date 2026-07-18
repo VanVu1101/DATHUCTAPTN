@@ -120,11 +120,14 @@ const assignStudentPeriod = async (req, res) => {
 
 const assignStudentMentor = async (req, res) => {
     try {
-        const updateData = {
-            mentorId: req.body.mentorId
-        };
-        if (req.body.mentorName) updateData.mentorName = req.body.mentorName;
-        const student = await studentService.updateStudent(req.params.id, updateData);
+        if (!req.body.mentorId) {
+            return res.status(400).json({ success: false, message: 'Vui lòng chọn mentor' });
+        }
+        const student = await studentService.assignMentor(
+            req.params.id,
+            req.body.mentorId,
+            req.user
+        );
         res.status(200).json({ success: true, data: student });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });

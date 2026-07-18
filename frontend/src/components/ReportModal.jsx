@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createWeeklyReport, submitReport, createAdminReport } from '../services/reportService';
-import StudentAutocomplete from './StudentAutocomplete';
+import { createWeeklyReport, submitReport, updateWeeklyReport } from '../services/reportService';
 
 const createInitialState = (periodId = '') => ({
   periodId,
@@ -12,14 +11,13 @@ const createInitialState = (periodId = '') => ({
   reviewerNote: ''
 });
 
-function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, periods = [], onSave, students = [] }) {
+function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, periods = [], onSave }) {
   const [message, setMessage] = useState('');
   const [status, setStatus] = useState('');
   const [file, setFile] = useState(null);
   const [content, setContent] = useState('');
   const [preview, setPreview] = useState(null);
   const [form, setForm] = useState(createInitialState(periods[0]?.id ? String(periods[0].id) : ''));
-  const [selectedStudent, setSelectedStudent] = useState('');
 
   useEffect(() => {
     if (!open) {
@@ -28,7 +26,6 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
       setPreview(null);
       setFile(null);
       setContent('');
-      setSelectedStudent('');
       setForm(createInitialState(periods[0]?.id ? String(periods[0].id) : ''));
       return;
     }
@@ -37,12 +34,21 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
       setForm(createInitialState(periods[0]?.id ? String(periods[0].id) : ''));
       setContent('');
       setFile(null);
-      setSelectedStudent('');
+    } else if (mode === 'edit-weekly' && weeklyReport) {
+      setForm({
+        periodId: String(weeklyReport.periodId || ''),
+        weekNumber: weeklyReport.weekNumber || '',
+        title: weeklyReport.title || '',
+        description: weeklyReport.description || '',
+        dueDate: weeklyReport.dueDate ? String(weeklyReport.dueDate).slice(0, 10) : '',
+        status: weeklyReport.status || 'ACTIVE',
+        reviewerNote: '',
+      });
+      setFile(null);
     } else if (mode === 'submit') {
       setForm(createInitialState(periods[0]?.id ? String(periods[0].id) : ''));
       setContent(weeklyReport?.submission?.content || '');
       setFile(null);
-      setSelectedStudent('');
     } else if (mode === 'edit' && weeklyReport) {
       setForm({
         periodId: weeklyReport.periodId ? String(weeklyReport.periodId) : (periods[0]?.id ? String(periods[0].id) : ''),
@@ -53,7 +59,6 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
         status: weeklyReport.status || 'SUBMITTED',
         reviewerNote: weeklyReport.reviewerNote || ''
       });
-      setSelectedStudent(weeklyReport.studentId ? String(weeklyReport.studentId) : '');
       setContent(weeklyReport.content || '');
       setFile(null);
     }
@@ -61,6 +66,7 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
 
   const title = useMemo(() => {
     if (mode === 'create') return 'Tạo báo cáo tuần mới';
+    if (mode === 'edit-weekly') return 'Sửa tuần báo cáo';
     if (mode === 'edit') return 'Sửa báo cáo admin';
     if (!weeklyReport) return 'Nộp báo cáo mới';
     return 'Nộp báo cáo tuần';
@@ -72,49 +78,38 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
 
     try {
       if (mode === 'create') {
-        // If admin selected a student, create a report entry for that student
-          if (selectedStudent) {
-          const studentId = typeof selectedStudent === 'object' ? selectedStudent.id : Number(selectedStudent);
-          const payload = {
-            studentId: Number(studentId),
-            periodId: form.periodId ? Number(form.periodId) : undefined,
-            weekNumber: Number(form.weekNumber),
-            title: form.title,
-            description: form.description || '',
-            userId: null // admin-created report, userId may be null or admin's id depending on backend
-          };
-          // call admin create report endpoint
-            try {
-              const res = await createAdminReport(payload);
-              if (res?.success) {
-                setStatus('success');
-                setMessage('Đã tạo báo cáo cho sinh viên.');
-                setPreview({ weekNumber: form.weekNumber, title: form.title, date: new Date().toLocaleDateString('vi-VN') });
-              } else {
-                setStatus('error');
-                setMessage(res?.message || 'Không thể tạo báo cáo cho sinh viên');
-              }
-            } catch (err) {
-              setStatus('error');
-              setMessage(err?.response?.data?.message || err?.message || 'Lỗi khi tạo báo cáo cho sinh viên');
-            }
-          return;
-        }
-
-        const res = await createWeeklyReport({
-          periodId: Number(form.periodId),
-          weekNumber: Number(form.weekNumber),
-          title: form.title,
-          description: form.description,
-          dueDate: form.dueDate || null,
-        });
+        const payload = new FormData();
+        payload.append('periodId', String(form.periodId));
+        payload.append('weekNumber', String(form.weekNumber));
+        payload.append('title', form.title);
+        payload.append('description', form.description);
+        if (form.dueDate) payload.append('dueDate', form.dueDate);
+        if (file) payload.append('file', file);
+        const res = await createWeeklyReport(payload);
         if (res?.success) {
           setStatus('success');
-          setMessage('Đã tạo báo cáo tuần mới.');
-          setPreview({ weekNumber: form.weekNumber, title: form.title, date: new Date().toLocaleDateString('vi-VN') });
+          setMessage(res.message || 'Tạo tuần báo cáo thành công.');
+          window.setTimeout(onClose, 700);
         } else {
           setStatus('error');
           setMessage(res?.message || 'Không thể tạo báo cáo tuần');
+        }
+        return;
+      }
+
+      if (mode === 'edit-weekly') {
+        const payload = new FormData();
+        payload.append('periodId', String(form.periodId));
+        payload.append('weekNumber', String(form.weekNumber));
+        payload.append('title', form.title);
+        payload.append('description', form.description);
+        if (form.dueDate) payload.append('dueDate', form.dueDate);
+        if (file) payload.append('file', file);
+        const res = await updateWeeklyReport(weeklyReport.id, payload);
+        if (res?.success) {
+          setStatus('success');
+          setMessage('Đã cập nhật tuần báo cáo.');
+          window.setTimeout(onClose, 700);
         }
         return;
       }
@@ -130,7 +125,6 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
           content,
           status: form.status,
           reviewerNote: form.reviewerNote,
-          studentId: selectedStudent || undefined
         };
 
         await onSave(payload);
@@ -177,8 +171,6 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
     setForm((current) => ({ ...current, [name]: value }));
   };
 
-  const handleStudentChange = (e) => setSelectedStudent(e.target.value);
-
   if (!open) return null;
 
   return (
@@ -190,18 +182,8 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
         </div>
 
         <form className="form-stack" onSubmit={handleSubmit}>
-          {mode === 'create' ? (
+          {mode === 'create' || mode === 'edit-weekly' ? (
             <>
-                      {Array.isArray(students) && (
-                        <label className="profile-field">
-                          <span>Sinh viên (tuỳ chọn)</span>
-                          <StudentAutocomplete
-                            value={selectedStudent}
-                            onChange={(s) => setSelectedStudent(s)}
-                            placeholder="Gõ tên hoặc mã sinh viên..."
-                          />
-                        </label>
-                      )}
               <label className="profile-field">
                 <span>Đợt thực tập</span>
                 <select name="periodId" value={form.periodId} onChange={handleCreateChange} required>
@@ -225,7 +207,11 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
               </label>
               <label className="profile-field">
                 <span>Hạn nộp (tuỳ chọn)</span>
-                <input type="date" name="dueDate" value={form.dueDate} onChange={handleCreateChange} />
+                <input type="date" min={new Date().toISOString().slice(0, 10)} name="dueDate" value={form.dueDate} onChange={handleCreateChange} />
+              </label>
+              <label className="profile-field">
+                <span>Tệp yêu cầu (tuỳ chọn)</span>
+                <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
               </label>
             </>
           ) : mode === 'edit' ? (
@@ -234,17 +220,6 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
                 <p><strong>Tuần:</strong> {form.weekNumber}</p>
                 <p><strong>Trạng thái hiện tại:</strong> {form.status}</p>
               </div>
-              {Array.isArray(students) && students.length > 0 && (
-                <label className="profile-field">
-                  <span>Sinh viên</span>
-                  <select value={selectedStudent} onChange={handleStudentChange}>
-                    <option value="">(Chọn sinh viên)</option>
-                    {students.map((s) => (
-                      <option key={s.id} value={s.id}>{s.fullName || s.studentCode || `SV#${s.id}`}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
               <label className="profile-field">
                 <span>Nội dung báo cáo</span>
                 <textarea rows="6" placeholder="Nội dung báo cáo" value={content} onChange={(e) => setContent(e.target.value)} required />
@@ -263,27 +238,14 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
               </label>
               {weeklyReport?.fileUrl && (
                 <div className="form-note">
-                  <strong>File hiện tại:</strong> <a href={`http://localhost:5000${weeklyReport.fileUrl}`} target="_blank" rel="noreferrer">{weeklyReport.fileName || 'Xem file'}</a>
+                  <strong>File hiện tại:</strong> <a href={weeklyReport.fileUrl} target="_blank" rel="noreferrer">{weeklyReport.fileName || 'Xem file'}</a>
                 </div>
               )}
             </>
           ) : (
             <>
               {!weeklyReport ? (
-                <>
-                  <label className="profile-field">
-                    <span>Số tuần</span>
-                    <input type="number" min="1" name="weekNumber" placeholder="Số tuần" value={form.weekNumber} onChange={handleCreateChange} required />
-                  </label>
-                  <label className="profile-field">
-                    <span>Tiêu đề (tuỳ chọn)</span>
-                    <input type="text" name="title" placeholder="Tiêu đề báo cáo" value={form.title} onChange={handleCreateChange} />
-                  </label>
-                  <label className="profile-field">
-                    <span>Mô tả (tuỳ chọn)</span>
-                    <textarea rows="4" name="description" placeholder="Mô tả nội dung báo cáo" value={form.description} onChange={handleCreateChange} />
-                  </label>
-                </>
+                <p className="form-note">Admin chưa tạo tuần báo cáo khả dụng.</p>
               ) : (
                 <>
                   <div className="report-modal-summary">
@@ -306,7 +268,7 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
           )}
 
           <div className="button-row">
-            <button className="btn" type="submit">{mode === 'create' ? 'Tạo tuần báo cáo' : mode === 'edit' ? 'Lưu thay đổi' : 'Nộp báo cáo'}</button>
+            <button className="btn" type="submit">{mode === 'create' ? 'Tạo tuần báo cáo' : mode === 'edit-weekly' || mode === 'edit' ? 'Lưu thay đổi' : 'Nộp báo cáo'}</button>
             <button type="button" className="btn outline" onClick={onClose}>Hủy</button>
           </div>
         </form>

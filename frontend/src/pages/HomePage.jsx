@@ -438,8 +438,14 @@ function HomePage() {
         <div className="hero-actions-right">
           {user ? (
             <>
-              <button className="btn" onClick={() => navigate('/checkin')}>Check-in</button>
-              <button className="btn" onClick={() => navigate('/reports')}>Nộp báo cáo</button>
+              {user.role === 'ADMIN' ? (
+                <button className="btn" onClick={() => navigate('/dashboard')}>Mở Dashboard</button>
+              ) : (
+                <>
+                  <button className="btn" onClick={() => navigate('/checkin')}>Check-in</button>
+                  <button className="btn" onClick={() => navigate('/reports')}>Nộp báo cáo</button>
+                </>
+              )}
               <button className="btn" onClick={handleLogout}>Đăng xuất</button>
             </>
           ) : (
