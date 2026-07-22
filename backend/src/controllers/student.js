@@ -75,10 +75,18 @@ const uploadProfileImage = async (req, res) => {
         if (!req.file) {
             return res.status(400).json({ success: false, message: 'Vui lòng chọn ảnh để upload' });
         }
+        console.log('uploadProfileImage: received file', {
+            userId: req.user?.id,
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size
+        });
         const profile = await studentService.uploadProfileImage(req.user.id, req.file);
+        console.log('uploadProfileImage: updated profile for user', req.user?.id, 'profileImageUrl:', profile?.profileImageUrl || profile?.data?.profileImageUrl || 'N/A');
         res.status(200).json({ success: true, message: 'Đã cập nhật ảnh hồ sơ', data: profile });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error('uploadProfileImage error:', error && error.stack ? error.stack : error);
+        res.status(500).json({ success: false, message: error.message || 'Lỗi upload ảnh hồ sơ' });
     }
 };
 
@@ -210,3 +218,17 @@ module.exports = {
     updateMajor,
     deleteMajor
 };
+
+const saveProfileImageKey = async (req, res) => {
+    try {
+        const { key } = req.body;
+        if (!key) return res.status(400).json({ success: false, message: 'key is required' });
+        const profile = await studentService.saveProfileImageKey(req.user.id, key);
+        res.status(200).json({ success: true, message: 'Đã lưu key ảnh hồ sơ', data: profile });
+    } catch (error) {
+        console.error('saveProfileImageKey error:', error && error.stack ? error.stack : error);
+        res.status(500).json({ success: false, message: error.message || 'Lỗi lưu key ảnh' });
+    }
+};
+
+module.exports.saveProfileImageKey = saveProfileImageKey;

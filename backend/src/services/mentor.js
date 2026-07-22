@@ -4,7 +4,9 @@ const sequelize = require('../config/database');
 const User = require('../models/user');
 const Mentor = require('../models/mentor');
 const Internship = require('../models/internship');
+const InternshipPeriod = require('../models/internshipPeriod');
 const Student = require('../models/student');
+const { getFileUrl } = require('../config/s3');
 
 const listMentors = async (actor) => {
     const where = actor.role === 'ADMIN'
@@ -19,6 +21,14 @@ const listMentors = async (actor) => {
 
     return Promise.all(mentors.map(async (mentor) => {
         const item = mentor.get({ plain: true });
+        if (item.User?.profileImageUrl && !String(item.User.profileImageUrl).startsWith('http')) {
+            try {
+                item.User.profileImageUrl = await getFileUrl(item.User.profileImageUrl);
+            } catch (error) {
+                // ignore conversion errors
+            }
+        }
+        item.avatar = item.User?.profileImageUrl || null;
         item.assignedStudentCount = await Internship.count({
             where: {
                 mentorId: mentor.id,
@@ -125,20 +135,77 @@ const getAssignedStudents = async (actor) => {
     return internships;
 };
 
-const getCompanyStudents = async (actor) => {
+const buildStudentSearchClause = (search) => {
+    if (!search) return null;
+    const normalized = `%${search.trim()}%`;
+    return {
+        [Op.or]: [
+            { fullName: { [Op.like]: normalized } },
+            { studentCode: { [Op.like]: normalized } },
+            { enterpriseName: { [Op.like]: normalized } },
+            { majorName: { [Op.like]: normalized } }
+        ]
+    };
+};
+
+const buildStudentFilters = (query = {}) => {
+    const clauses = [];
+    if (query.search) clauses.push(buildStudentSearchClause(query.search));
+    if (query.periodId) clauses.push({ periodId: Number(query.periodId) });
+    if (query.majorName) clauses.push({ majorName: query.majorName });
+    if (query.enterpriseName) clauses.push({ enterpriseName: query.enterpriseName });
+    if (query.assignedStatus === 'unassigned') clauses.push({ mentorId: null });
+    if (query.assignedStatus === 'assigned') clauses.push({ mentorId: { [Op.ne]: null } });
+    if (!clauses.length) return {};
+    return { [Op.and]: clauses };
+};
+
+const getCompanyStudents = async (actor, query = {}) => {
+    const baseFilter = buildStudentFilters(query);
+    const studentQuery = {
+        where: baseFilter,
+        include: [
+            { model: Mentor, attributes: ['id', 'fullName'] },
+            { model: InternshipPeriod, attributes: ['id', 'name'] }
+        ],
+        order: [['fullName', 'ASC']]
+    };
+
     if (actor.role === 'ADMIN') {
-        return Student.findAll({ order: [['fullName', 'ASC']] });
+        return Student.findAll(studentQuery);
     }
+
     const ownedMentors = await Mentor.findAll({
-        where: { ownerUserId: actor.id },
+        where: { [Op.or]: [{ ownerUserId: actor.id }, { userId: actor.id }] },
         attributes: ['id', 'companyName']
     });
-    const companyNames = [...new Set(ownedMentors.map((mentor) => mentor.companyName).filter(Boolean))];
-    if (!companyNames.length) return [];
-    return Student.findAll({
-        where: { enterpriseName: { [Op.in]: companyNames } },
-        order: [['fullName', 'ASC']]
-    });
+
+    const mentorIds = ownedMentors.map((mentor) => mentor.id).filter(Boolean);
+    const companyNames = [...new Set(ownedMentors.map((mentor) => (mentor.companyName || '').trim()).filter(Boolean))];
+
+    if (!companyNames.length && !mentorIds.length) return [];
+
+    const companyClause = { [Op.or]: [] };
+    if (companyNames.length) companyClause[Op.or].push({ enterpriseName: { [Op.in]: companyNames } });
+    if (mentorIds.length) companyClause[Op.or].push({ mentorId: { [Op.in]: mentorIds } });
+
+    if (!companyClause[Op.or].length) return [];
+
+    if (Object.keys(baseFilter).length) {
+        studentQuery.where = { [Op.and]: [ baseFilter, companyClause ] };
+    } else {
+        studentQuery.where = companyClause;
+    }
+
+    return Student.findAll(studentQuery);
+};
+
+const getAssignableStudents = async (actor, query = {}) => {
+    const effectiveQuery = { ...query };
+    if (!effectiveQuery.assignedStatus) {
+        effectiveQuery.assignedStatus = 'unassigned';
+    }
+    return getCompanyStudents(actor, effectiveQuery);
 };
 
 module.exports = {
@@ -147,5 +214,6 @@ module.exports = {
     updateMentor,
     deleteMentor,
     getAssignedStudents,
-    getCompanyStudents
+    getCompanyStudents,
+    getAssignableStudents
 };

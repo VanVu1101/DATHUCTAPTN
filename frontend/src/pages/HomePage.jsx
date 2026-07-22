@@ -154,13 +154,22 @@ function HomePage() {
     const load = async () => {
       setLoading(true);
       try {
-        const [profileResult, reportsResult, checkInsResult, periodsResult, summaryResult] = await Promise.allSettled([
-          getMyProfile(),
-          getMyReports(),
-          getMyCheckIns(),
-          getAllPeriods(),
-          getMySummary(),
-        ]);
+        const storedRole = (() => {
+          try { return JSON.parse(localStorage.getItem('user') || '{}').role; } catch { return null; }
+        })();
+
+        // Only request student-scoped endpoints when the logged-in user is a STUDENT
+        const requests = [getMyProfile(), getMyReports(), getAllPeriods(), getMySummary()];
+        if (storedRole === 'STUDENT') requests.splice(2, 0, getMyCheckIns()); // insert checkIns as third
+
+        const results = await Promise.allSettled(requests);
+
+        // map results back depending on whether checkIns was included
+        const profileResult = results[0];
+        const reportsResult = results[1];
+        const checkInsResult = storedRole === 'STUDENT' ? results[2] : { status: 'fulfilled', value: { success: true, data: [] } };
+        const periodsResult = storedRole === 'STUDENT' ? results[3] : results[2];
+        const summaryResult = storedRole === 'STUDENT' ? results[4] : results[3];
 
         if (profileResult.status === 'fulfilled' && profileResult.value?.success) {
           setProfile(profileResult.value.data || null);
@@ -294,6 +303,12 @@ function HomePage() {
     progressPercent != null ? { title: 'Tiến độ', value: `${progressPercent}%`, subtitle: currentPeriod?.name || 'Đợt hiện tại', icon: '📈' } : null,
     reports.length ? { title: 'Báo cáo', value: reports.length, subtitle: 'Đã nộp', icon: '📝' } : null,
     {
+      title: 'Check-in',
+      value: checkIns.length || 0,
+      subtitle: checkIns.length ? 'Lượt check-in gần đây' : 'Chưa có dữ liệu',
+      icon: '✅',
+    },
+    {
       title: 'Điểm TB',
       value: averageScore != null ? averageScore.toFixed(1) : '—',
       subtitle: averageScore != null
@@ -391,7 +406,7 @@ function HomePage() {
       });
     });
 
-    return items.sort((left, right) => right.sortKey - left.sortKey).slice(0, 6);
+    return items.sort((left, right) => right.sortKey - left.sortKey).slice(0, 5);
   }, [checkIns, meetings, reports, tasks]);
 
   const recentReports = reports.slice(0, 3);
@@ -422,14 +437,16 @@ function HomePage() {
     <div className="dashboard-grid home-page">
       <section className="hero-wide">
         <div className="hero-left">
+          <p className="hero-kicker">Tổng quan thực tập</p>
           <h2>{getGreeting()},</h2>
           <h1>{user ? normalizedName : 'đăng nhập ngay'}</h1>
           <p className="hero-subtitle">
             {profile?.majorName || 'Thực tập sinh'}{profile?.enterpriseName ? ` · ${profile.enterpriseName}` : ''}
+            {currentPeriod?.name ? ` · ${currentPeriod.name}` : ''}
           </p>
           {heroTags.length > 0 && (
-            <div className="hero-tags">
-              {heroTags.map((tag, index) => (
+            <div className="hero-badges">
+              {heroTags.slice(0, 3).map((tag, index) => (
                 <span className="tag" key={`${tag}-${index}`}>{tag}</span>
               ))}
             </div>
@@ -439,19 +456,19 @@ function HomePage() {
           {user ? (
             <>
               {user.role === 'ADMIN' ? (
-                <button className="btn" onClick={() => navigate('/dashboard')}>Mở Dashboard</button>
+                <button className="btn primary" onClick={() => navigate('/dashboard')}>Mở Dashboard</button>
               ) : (
                 <>
-                  <button className="btn" onClick={() => navigate('/checkin')}>Check-in</button>
-                  <button className="btn" onClick={() => navigate('/reports')}>Nộp báo cáo</button>
+                  <button className="btn primary" onClick={() => navigate('/checkin')}>Check-in</button>
+                  <button className="btn outline" onClick={() => navigate('/reports')}>Báo cáo</button>
                 </>
               )}
-              <button className="btn" onClick={handleLogout}>Đăng xuất</button>
+              <button className="btn ghost" onClick={handleLogout}>Đăng xuất</button>
             </>
           ) : (
             <>
-              <button className="btn outline" onClick={() => navigate('/login')}>Đăng nhập</button>
-              <button className="btn" onClick={() => navigate('/login')}>Đăng ký</button>
+              <button className="btn primary" onClick={() => navigate('/login')}>Đăng nhập</button>
+              <button className="btn outline" onClick={() => navigate('/login')}>Đăng ký</button>
             </>
           )}
         </div>
@@ -478,6 +495,7 @@ function HomePage() {
       {(taskItems.length > 0 || activityItems.length > 0 || canShowRightColumn) && (
         <section className={`main-columns ${canShowRightColumn ? '' : 'main-columns--single'}`}>
           <div className="col-left">
+            {taskItems.length > 0 && <TaskList tasks={taskItems} />}
             {activityItems.length > 0 && <ActivityList items={activityItems} />}
           </div>
 

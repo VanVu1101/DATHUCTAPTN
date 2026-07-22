@@ -68,6 +68,7 @@ function ProfilePage() {
   const navigate = useNavigate();
   const [form, setForm] = useState(initialForm);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarLoadError, setAvatarLoadError] = useState(false);
   const avatarInputRef = useRef(null);
   const [periods, setPeriods] = useState([]);
   const [majors, setMajors] = useState([]);
@@ -218,6 +219,7 @@ function ProfilePage() {
     if (!file) return;
     setAvatarUploading(true);
     try {
+      setAvatarLoadError(false);
       const formData = new FormData();
       formData.append('file', file);
       const res = await uploadProfileImage(formData);
@@ -227,7 +229,7 @@ function ProfilePage() {
         const normalizedProfile = {
           ...(profile || {}),
           ...(next || {}),
-          profileImageUrl: next?.profileImageUrl || profile?.profileImageUrl || '',
+          profileImageUrl: next?.profileImageUrl || next?.avatar || profile?.profileImageUrl || profile?.avatar || '',
           avatar: next?.profileImageUrl || next?.avatar || profile?.profileImageUrl || profile?.avatar || '',
           periodName: next?.periodName || profile?.periodName || '',
           internshipDuration: next?.internshipDuration || profile?.internshipDuration || '',
@@ -471,9 +473,17 @@ function ProfilePage() {
           <div className="avatar-column">
             <div className="profile-avatar-wrapper">
               <div className="avatar profile-avatar" onClick={handleAvatarClick} style={{ cursor: 'pointer' }}>
-                {profile?.profileImageUrl ? (
+                {profile?.profileImageUrl && !avatarLoadError ? (
                   // eslint-disable-next-line jsx-a11y/img-redundant-alt
-                  <img src={profile.profileImageUrl} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }} />
+                  <img
+                    src={profile.profileImageUrl}
+                    alt="avatar"
+                    style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }}
+                    onError={() => {
+                      console.warn('Avatar image failed to load:', profile.profileImageUrl);
+                      setAvatarLoadError(true);
+                    }}
+                  />
                 ) : (
                   displayInitials
                 )}

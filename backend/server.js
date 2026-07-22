@@ -153,6 +153,9 @@ const evaluationRoutes = require('./src/routes/evaluation');
 const notificationRoutes = require('./src/routes/notification');
 const chatRoutes = require('./src/routes/chat');
 const mentorRoutes = require('./src/routes/mentor');
+const uploadRoutes = require('./src/routes/upload');
+const studentGoalRoutes = require('./src/routes/studentGoal');
+const userRoutes = require('./src/routes/user');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
@@ -168,6 +171,9 @@ app.use('/api/evaluations', evaluationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/mentors', mentorRoutes);
+app.use('/api/upload', uploadRoutes);
+app.use('/api/goals', studentGoalRoutes);
+app.use('/api/users', userRoutes);
 
 // 2. Đồng bộ Database an toàn: tạo bảng mới nếu chưa có, và bổ sung cột thiếu cho bảng tasks
 const ensureTaskTableColumns = async () => {
@@ -214,7 +220,8 @@ const ensureStudentTableColumns = async () => {
 
         const columnsToAdd = [
             ['mentorId', { type: DataTypes.INTEGER, allowNull: true }],
-            ['status', { type: DataTypes.ENUM('ACTIVE', 'INACTIVE', 'COMPLETED'), allowNull: true, defaultValue: 'ACTIVE' }]
+            ['status', { type: DataTypes.ENUM('ACTIVE', 'INACTIVE', 'COMPLETED'), allowNull: true, defaultValue: 'ACTIVE' }],
+            ['profileImageUrl', { type: DataTypes.STRING, allowNull: true }]
         ];
 
         for (const [columnName, definition] of columnsToAdd) {
@@ -225,6 +232,27 @@ const ensureStudentTableColumns = async () => {
         }
     } catch (error) {
         console.error('❌ Lỗi khi kiểm tra/bổ sung cột bảng students:', error);
+    }
+};
+
+const ensureUserTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const userTable = await queryInterface.describeTable('users').catch(() => null);
+
+        if (!userTable) {
+            return;
+        }
+
+        if (!userTable.profileImageUrl) {
+            await queryInterface.addColumn('users', 'profileImageUrl', {
+                type: DataTypes.STRING,
+                allowNull: true
+            });
+            console.log('✅ Đã thêm cột profileImageUrl vào bảng users');
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi kiểm tra/bổ sung cột bảng users:', error);
     }
 };
 
@@ -353,19 +381,49 @@ const ensureMeetingTableColumns = async () => {
     }
 };
 
+const ensureCheckInTableColumns = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const table = await queryInterface.describeTable('check_ins').catch(() => null);
+        if (!table) return;
+        if (!table.photoUrl) {
+            await queryInterface.addColumn('check_ins', 'photoUrl', { type: DataTypes.STRING, allowNull: true });
+            console.log('✅ Đã thêm cột photoUrl vào bảng check_ins');
+        }
+        if (!table.geoLat) {
+            await queryInterface.addColumn('check_ins', 'geoLat', { type: DataTypes.FLOAT, allowNull: true });
+            console.log('✅ Đã thêm cột geoLat vào bảng check_ins');
+        }
+        if (!table.geoLng) {
+            await queryInterface.addColumn('check_ins', 'geoLng', { type: DataTypes.FLOAT, allowNull: true });
+            console.log('✅ Đã thêm cột geoLng vào bảng check_ins');
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi bổ sung bảng check_ins:', error);
+    }
+};
+
 sequelize.sync()
     .then(async () => {
         await ensureTaskTableColumns();
         await ensureStudentTableColumns();
+        await ensureUserTableColumns();
         await ensureReportTableColumns();
         await ensureEvaluationTableColumns();
         await ensureNotificationTableColumns();
         await ensureMentorTableColumns();
         await ensureWeeklyReportTableColumns();
         await ensureMeetingTableColumns();
+        await ensureCheckInTableColumns();
         console.log('✅ Đã đồng bộ các bảng trong MySQL!');
     })
     .catch(err => console.error('❌ Lỗi đồng bộ bảng:', err));
+
+// Start automation: reminders for upcoming schedules/meetings
+const { notifyUpcomingEvents } = require('./src/services/checkInAutomation');
+setInterval(() => {
+    notifyUpcomingEvents({ lookaheadMinutes: 30, notifyBeforeMinutes: 15 });
+}, 60 * 1000 * 5); // every 5 minutes
 
 // 3. Khởi chạy Server
 const PORT = process.env.PORT || 5000;

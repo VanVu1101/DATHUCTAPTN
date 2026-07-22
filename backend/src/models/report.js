@@ -23,8 +23,8 @@ const Report = sequelize.define('Report', {
         type: DataTypes.INTEGER
     },
     status: {
-        type: DataTypes.ENUM('SUBMITTED', 'APPROVED', 'REJECTED'),
-        defaultValue: 'SUBMITTED'
+        type: DataTypes.ENUM('DRAFT', 'SUBMITTED', 'REVIEWED', 'REJECTED'),
+        defaultValue: 'DRAFT'
     },
     reviewerNote: {
         type: DataTypes.TEXT

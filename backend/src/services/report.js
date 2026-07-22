@@ -6,7 +6,44 @@ const InternshipPeriod = require('../models/internshipPeriod');
 const Position = require('../models/position');
 const Mentor = require('../models/mentor');
 const Evaluation = require('../models/evaluation');
+const Notification = require('../models/notification');
 // Evaluation model already required above
+
+const VALID_REPORT_STATUSES = ['DRAFT', 'SUBMITTED', 'REVIEWED', 'REJECTED'];
+const { normalizeReportStatus } = require('./reportWorkflow');
+
+const mapStatusForResponse = (status) => {
+    if (!status) return status;
+    const normalized = String(status).trim().toUpperCase();
+    if (normalized === 'REVIEWED') return 'APPROVED';
+    return normalized;
+};
+
+const normalizeIncomingStatus = (status) => normalizeReportStatus(status);
+
+const mapReportResponse = (report) => {
+    if (!report) return report;
+    const obj = typeof report.toJSON === 'function' ? report.toJSON() : { ...report };
+    if (obj.status) obj.status = mapStatusForResponse(obj.status);
+    if (obj.submission && typeof obj.submission === 'object') {
+        obj.submission = { ...obj.submission };
+        if (obj.submission.status) obj.submission.status = mapStatusForResponse(obj.submission.status);
+    }
+    return obj;
+};
+
+const mapReportsResponse = (reports) => {
+    if (!Array.isArray(reports)) return reports;
+    return reports.map(mapReportResponse);
+};
+
+const normalizeFilterStatus = (status) => {
+    if (!status) return null;
+    const normalized = String(status).trim().toUpperCase();
+    if (normalized === 'APPROVED') return 'REVIEWED';
+    if (VALID_REPORT_STATUSES.includes(normalized)) return normalized;
+    return null;
+};
 
 const getLatestInternshipForUser = async (userId) => {
     const student = await Student.findOne({ where: { userId } });
@@ -136,21 +173,29 @@ const { Op } = require('sequelize');
 const getWeeklyReportsForUser = async (userId, periodId = null) => {
     const student = await Student.findOne({ where: { userId } });
     if (!student) {
-        throw new Error('Không tìm thấy sinh viên để gửi báo cáo');
+        return [];
     }
 
-    let internship = null;
     let periodToUse = null;
+    let internship = null;
+
     if (periodId) {
         periodToUse = Number(periodId);
-        internship = await Internship.findOne({ where: { studentId: student.id, periodId: periodToUse } });
+        if (periodToUse > 0) {
+            internship = await Internship.findOne({ where: { studentId: student.id, periodId: periodToUse } });
+        }
     } else {
-        internship = await getLatestInternshipForUser(userId);
-        periodToUse = internship?.periodId || null;
+        periodToUse = student.periodId || null;
+        if (periodToUse) {
+            internship = await Internship.findOne({
+                where: { studentId: student.id, periodId: periodToUse },
+                order: [['createdAt', 'DESC']]
+            });
+        }
     }
 
     if (!periodToUse) {
-        throw new Error('Không tìm thấy kỳ thực tập phù hợp');
+        return [];
     }
 
     const weeklyReports = await WeeklyReport.findAll({
@@ -172,7 +217,10 @@ const getWeeklyReportsForUser = async (userId, periodId = null) => {
 
     return weeklyReports.map((weeklyReport) => {
         const submission = submissions.find((item) => item.weeklyReportId === weeklyReport.id || item.weekNumber === weeklyReport.weekNumber) || null;
-        const submissionObj = submission ? (typeof submission.toJSON === 'function' ? submission.toJSON() : submission) : null;
+        let submissionObj = submission ? (typeof submission.toJSON === 'function' ? submission.toJSON() : submission) : null;
+        if (submissionObj) {
+            submissionObj = mapReportResponse(submissionObj);
+        }
         if (submissionObj && evaluation) {
             submissionObj.evaluation = evaluation.toJSON ? evaluation.toJSON() : evaluation;
             // if submission itself doesn't have a score, use evaluation score
@@ -193,6 +241,7 @@ const getWeeklyReportsForUser = async (userId, periodId = null) => {
 
 const createReportForUser = async (data) => {
     if (!data.weekNumber && !data.weeklyReportId) throw new Error('weekNumber is required');
+    const status = normalizeIncomingStatus(data.status || 'SUBMITTED');
 
     const student = await Student.findOne({ where: { userId: data.userId } });
     if (!student) {
@@ -234,27 +283,29 @@ const createReportForUser = async (data) => {
         if (data.fileUrl) existingReport.fileUrl = data.fileUrl;
         if (data.fileName) existingReport.fileName = data.fileName;
         if (data.fileType) existingReport.fileType = data.fileType;
-        existingReport.status = 'SUBMITTED';
+        existingReport.status = status === 'DRAFT' ? 'DRAFT' : 'SUBMITTED';
         existingReport.reviewerNote = null;
         if (weeklyReport) existingReport.weeklyReportId = weeklyReport.id;
-        return existingReport.save();
+        return mapReportResponse(await existingReport.save());
     }
 
-    return await Report.create({
+    const report = await Report.create({
         ...data,
+        status,
         internshipId: internship.id,
         studentId: student.id,
         weeklyReportId: weeklyReport?.id || data.weeklyReportId || null,
         weekNumber,
         userId: data.userId
     });
+    return mapReportResponse(report);
 };
 
 const getReportsForUser = async (userId) => {
     const student = await Student.findOne({ where: { userId } }).catch(() => null);
     const where = student ? { [Op.or]: [{ userId }, { studentId: student.id }] } : { userId };
     const rs = await Report.findAll({ where, order: [['createdAt', 'DESC']] });
-    if (!rs || !rs.length) return rs;
+    if (!rs || !rs.length) return mapReportsResponse(rs);
 
     // collect internshipIds and fetch evaluations in bulk
     const internshipIds = Array.from(new Set(rs.map((r) => r.internshipId).filter(Boolean)));
@@ -262,7 +313,7 @@ const getReportsForUser = async (userId) => {
     const evalMap = {};
     evaluations.forEach((ev) => { if (ev && ev.internshipId) evalMap[ev.internshipId] = ev; });
 
-    return rs.map((r) => {
+    const mapped = rs.map((r) => {
         const obj = typeof r.toJSON === 'function' ? r.toJSON() : r;
         const ev = obj.internshipId ? evalMap[obj.internshipId] : null;
         if (ev) {
@@ -271,6 +322,7 @@ const getReportsForUser = async (userId) => {
         }
         return obj;
     });
+    return mapReportsResponse(mapped);
 };
 
 const getMySummary = async (userId) => {
@@ -298,7 +350,8 @@ const getMySummary = async (userId) => {
 };
 
 const getAllReports = async () => {
-    return Report.findAll({ order: [['createdAt', 'DESC']] });
+    const reports = await Report.findAll({ order: [['createdAt', 'DESC']] });
+    return mapReportsResponse(reports);
 };
 
 const getReports = async (filters = {}) => {
@@ -306,7 +359,10 @@ const getReports = async (filters = {}) => {
     if (filters.studentId) where.studentId = Number(filters.studentId);
     if (filters.internshipId) where.internshipId = Number(filters.internshipId);
     if (filters.weeklyReportId) where.weeklyReportId = Number(filters.weeklyReportId);
-    if (filters.status) where.status = filters.status;
+    if (filters.status) {
+        const normalized = normalizeFilterStatus(filters.status);
+        if (normalized) where.status = normalized;
+    }
 
     const include = [
         { model: Student, attributes: ['id', 'fullName', 'studentCode'] },
@@ -314,7 +370,8 @@ const getReports = async (filters = {}) => {
         { model: WeeklyReport, required: false }
     ];
 
-    return Report.findAll({ where, include, order: [['createdAt', 'DESC']] });
+    const reports = await Report.findAll({ where, include, order: [['createdAt', 'DESC']] });
+    return mapReportsResponse(reports);
 };
 
 const createReport = async (data) => {
@@ -344,42 +401,47 @@ const createReport = async (data) => {
 
     if (existingReport) throw new Error(`Báo cáo tuần ${data.weekNumber} đã được nộp!`);
 
-    return await Report.create({
+    const normalizedStatus = data.status ? normalizeIncomingStatus(data.status) : undefined;
+    const report = await Report.create({
         ...data,
+        status: normalizedStatus || data.status,
         internshipId: internship.id,
         studentId: data.studentId || null,
         content: data.content ?? data.description ?? null,
         userId: data.userId ?? (student ? student.userId : null)
     });
+    return mapReportResponse(report);
 };
 
 const getReportsByInternship = async (internshipId) => {
-    return await Report.findAll({
+    const reports = await Report.findAll({
         where: { internshipId },
         order: [['weekNumber', 'ASC']]
     });
+    return mapReportsResponse(reports);
 };
 
 
 const updateReportStatus = async (id, status, reviewerNote = null, evalPayload = null, mentorId = null) => {
-    if (!['SUBMITTED', 'APPROVED', 'REJECTED'].includes(status)) {
+    const normalizedStatus = normalizeIncomingStatus(status);
+    if (!VALID_REPORT_STATUSES.includes(normalizedStatus)) {
         throw new Error('Trạng thái báo cáo không hợp lệ');
     }
 
     const report = await Report.findByPk(id);
     if (!report) throw new Error('Không tìm thấy báo cáo này!');
 
-    report.status = status;
+    report.status = normalizedStatus;
     if (reviewerNote !== undefined) {
         report.reviewerNote = reviewerNote;
     }
     const saved = await report.save();
 
-    console.log(`updateReportStatus: reportId=${id} status=${status} mentorId=${mentorId} evalPayload=${JSON.stringify(evalPayload)}`);
+    console.log(`updateReportStatus: reportId=${id} status=${status} normalizedStatus=${normalizedStatus} mentorId=${mentorId} evalPayload=${JSON.stringify(evalPayload)}`);
 
-    // If admin provides evaluation score when approving, create/update Evaluation
+    // If admin provides evaluation score when reviewing, create/update Evaluation
     try {
-        if (status === 'APPROVED' && evalPayload && evalPayload.score != null) {
+        if (normalizedStatus === 'REVIEWED' && evalPayload && evalPayload.score != null) {
             const internshipId = report.internshipId;
             if (internshipId) {
                 const internship = await Internship.findByPk(internshipId);
@@ -407,7 +469,21 @@ const updateReportStatus = async (id, status, reviewerNote = null, evalPayload =
         console.error('Error creating/updating Evaluation after report review:', e);
     }
 
-    return saved;
+    if (saved && saved.userId) {
+        try {
+            await Notification.create({
+                userId: saved.userId,
+                title: normalizedStatus === 'REVIEWED' ? 'Báo cáo đã được duyệt' : normalizedStatus === 'REJECTED' ? 'Báo cáo cần chỉnh sửa' : 'Báo cáo đã được cập nhật',
+                message: normalizedStatus === 'REVIEWED' ? 'Báo cáo của bạn đã được đánh giá thành công.' : normalizedStatus === 'REJECTED' ? 'Báo cáo của bạn cần chỉnh sửa theo nhận xét.' : 'Báo cáo của bạn đã có cập nhật trạng thái.',
+                type: 'REPORT_STATUS',
+                data: { reportId: saved.id, status: normalizedStatus }
+            });
+        } catch (notificationError) {
+            console.error('Report notification error:', notificationError.message);
+        }
+    }
+
+    return mapReportResponse(saved);
 };
 
 const updateReport = async (id, data) => {
@@ -419,19 +495,20 @@ const updateReport = async (id, data) => {
         if (!internship) throw new Error('Không tìm thấy kỳ thực tập này!');
     }
 
-    return await report.update({
+    const updated = await report.update({
         content: data.content ?? report.content,
         fileUrl: data.fileUrl ?? report.fileUrl,
         fileName: data.fileName ?? report.fileName,
         fileType: data.fileType ?? report.fileType,
         weekNumber: data.weekNumber ?? report.weekNumber,
         weeklyReportId: data.weeklyReportId ?? report.weeklyReportId,
-        status: data.status ?? report.status,
+        status: data.status ? normalizeIncomingStatus(data.status) : report.status,
         reviewerNote: data.reviewerNote ?? report.reviewerNote,
         internshipId: data.internshipId ?? report.internshipId,
         userId: data.userId ?? report.userId,
         studentId: data.studentId ?? report.studentId
     });
+    return mapReportResponse(updated);
 };
 
 const deleteReport = async (id) => {

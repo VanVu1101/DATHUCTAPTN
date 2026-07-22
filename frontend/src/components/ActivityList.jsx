@@ -3,7 +3,13 @@ function ActivityList({ items }) {
 
   return (
     <div className="card">
-      <h3>Hoạt động gần đây</h3>
+      <div className="card-header">
+        <div>
+          <h3>Hoạt động gần đây</h3>
+          <p className="card-subtitle">Cập nhật nhanh về báo cáo, check-in và lịch</p>
+        </div>
+        <span className="section-chip">Mới</span>
+      </div>
       <ul className="activity-list">
         {items.map((it, idx) => (
           <li key={idx} className="activity-item">

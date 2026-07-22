@@ -26,6 +26,7 @@ const createMeeting = async (req, res) => {
                 }
         res.status(201).json({ success: true, data: meeting });
     } catch (error) {
+        console.error('meeting.createMeeting error:', error && error.stack ? error.stack : error, { body: req.body, user: req.user });
         res.status(400).json({ success: false, message: error.message });
     }
 };

@@ -49,10 +49,18 @@ const assignedStudents = async (req, res) => {
 
 const companyStudents = async (req, res) => {
     try {
-        res.json({ success: true, data: await mentorService.getCompanyStudents(req.user) });
+        res.json({ success: true, data: await mentorService.getCompanyStudents(req.user, req.query) });
     } catch (error) {
         handleError(res, error, 500);
     }
 };
 
-module.exports = { list, create, update, remove, assignedStudents, companyStudents };
+const assignableStudents = async (req, res) => {
+    try {
+        res.json({ success: true, data: await mentorService.getAssignableStudents(req.user, req.query) });
+    } catch (error) {
+        handleError(res, error, 500);
+    }
+};
+
+module.exports = { list, create, update, remove, assignedStudents, companyStudents, assignableStudents };

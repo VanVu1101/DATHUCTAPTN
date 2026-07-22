@@ -4,6 +4,7 @@ const Student = require('../models/student');
 const ReportModel = require('../models/report');
 const notificationService = require('../services/notification');
 const { uploadFile } = require('../config/s3');
+const { notifyTaskAssigned, notifyDeadlineSoon } = require('../services/automation');
 
 const mentorOwnsStudent = async (userId, studentId) => {
     const mentor = await Mentor.findOne({ where: { userId } });

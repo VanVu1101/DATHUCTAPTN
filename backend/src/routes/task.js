@@ -29,6 +29,8 @@ router.get('/:id', taskController.getTaskById);
 router.post('/', checkRole(['ADMIN']), taskController.createTask);
 router.put('/:id', checkRole(['ADMIN']), taskController.updateTask);
 router.delete('/:id', checkRole(['ADMIN']), taskController.deleteTask);
+router.post('/:id/comments', taskController.addComment);
+router.post('/:id/mentor-note', checkRole(['ADMIN', 'MENTOR']), taskController.saveMentorNote);
 router.post('/:id/submit', taskUpload.single('file'), taskController.submitTask);
 
 module.exports = router;

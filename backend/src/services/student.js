@@ -9,9 +9,42 @@ const Position = require('../models/position');
 const ChatConversation = require('../models/chatConversation');
 const sequelize = require('../config/database');
 const StudentDocument = require('../models/studentDocument');
-const { uploadFile, deleteFile } = require('../config/s3');
+const { uploadFile, deleteFile, getFileUrl } = require('../config/s3');
 const reportService = require('./report');
+const notificationService = require('./notification');
+const studentProgressService = require('./studentProgress');
 const { filterStudentRecords, shouldCreateStudentProfile } = require('./studentHelpers');
+
+const extractStorageKeyFromUrl = (url) => {
+    if (!url) return null;
+    const raw = String(url).trim();
+    if (!raw.startsWith('http')) return raw;
+
+    try {
+        const parsed = new URL(raw);
+        const path = parsed.pathname.replace(/^\/+/, '');
+        if (path.startsWith('uploads/')) {
+            return path.slice('uploads/'.length);
+        }
+
+        const host = parsed.hostname || '';
+        const segments = path.split('/').filter(Boolean);
+
+        // https://bucket.s3.region.amazonaws.com/key
+        if (host.includes('.s3.') && segments.length > 0) {
+            return segments.join('/');
+        }
+
+        // https://s3.region.amazonaws.com/bucket/key
+        if (host.startsWith('s3') && segments.length > 1) {
+            return segments.slice(1).join('/');
+        }
+
+        return path;
+    } catch (error) {
+        return null;
+    }
+};
 
 const ensureDefaultMajor = async () => {
     let major = await Major.findOne();
@@ -38,46 +71,78 @@ const formatInternshipDuration = (period) => {
     return `${formatDate(start)} - ${formatDate(end)}`;
 };
 
-const buildProfilePayload = (student, user, options = {}) => ({
-    id: student?.id || null,
-    userId: user?.id || null,
-    studentCode: student?.studentCode || '',
-    fullName: student?.fullName || user?.email?.split('@')[0] || 'Sinh viên',
-    className: student?.className || '',
-    majorName: student?.majorName || student?.Major?.name || '',
-    enterpriseName: student?.enterpriseName || '',
-    mentorName: student?.mentorName || '',
-    email: user?.email || '',
-    role: user?.role || 'STUDENT',
-    phoneNumber: student?.phoneNumber || '',
-    address: student?.address || '',
-    bio: student?.bio || '',
-    linkedin: student?.linkedin || '',
-    university: student?.university || '',
-    groupName: student?.groupName || '',
-    birthDate: student?.birthDate || '',
-    headline: student?.headline || '',
-    emergencyContact: student?.emergencyContact || '',
-    emergencyPhone: student?.emergencyPhone || '',
-    profileImageUrl: student?.profileImageUrl || user?.profileImageUrl || '',
-    technicalSkills: student?.technicalSkills || [],
-    softSkills: student?.softSkills || [],
-    languages: student?.languages || [],
-    periodId: student?.periodId || null,
-    periodName: student?.InternshipPeriod?.name || '',
-    internshipDuration: formatInternshipDuration(student?.InternshipPeriod),
-    cvStatus: options.cvStatus || 'Chưa có',
-    internshipDocumentStatus: options.internshipDocumentStatus || 'Chưa có',
-    documentLink: options.documentLink || '',
-    reportProgress: options.reportProgress ?? 0,
-    lastReportStatus: options.lastReportStatus || null,
-    lastReportTitle: options.lastReportTitle || '',
-    lastReportSubmittedAt: options.lastReportSubmittedAt || null
-});
+const resolveProfileImageUrls = async (student, user) => {
+    const normalize = async (item, label) => {
+        if (!item?.profileImageUrl || String(item.profileImageUrl).startsWith('http')) return;
+        try {
+            item.profileImageUrl = await getFileUrl(item.profileImageUrl);
+        } catch (error) {
+            console.error(`resolveProfileImageUrls: failed to convert ${label}.profileImageUrl`, item.profileImageUrl, error?.message || error);
+        }
+    };
+
+    await Promise.all([
+        normalize(student, 'student'),
+        normalize(user, 'user')
+    ]);
+};
+
+const buildProfilePayload = (student, user, options = {}) => {
+    const profileImageUrlCandidates = [student?.profileImageUrl, user?.profileImageUrl].filter(Boolean);
+    const profileImageUrl = profileImageUrlCandidates.find((value) => String(value).startsWith('http')) || profileImageUrlCandidates[0] || '';
+
+    return {
+        id: student?.id || null,
+        userId: user?.id || null,
+        studentCode: student?.studentCode || '',
+        fullName: student?.fullName || user?.email?.split('@')[0] || 'Sinh viên',
+        className: student?.className || '',
+        majorName: student?.majorName || student?.Major?.name || '',
+        enterpriseName: student?.enterpriseName || '',
+        mentorName: student?.mentorName || '',
+        email: user?.email || '',
+        role: user?.role || 'STUDENT',
+        phoneNumber: student?.phoneNumber || '',
+        address: student?.address || '',
+        bio: student?.bio || '',
+        linkedin: student?.linkedin || '',
+        university: student?.university || '',
+        groupName: student?.groupName || '',
+        birthDate: student?.birthDate || '',
+        headline: student?.headline || '',
+        emergencyContact: student?.emergencyContact || '',
+        emergencyPhone: student?.emergencyPhone || '',
+        profileImageUrl,
+        avatar: profileImageUrl,
+        technicalSkills: student?.technicalSkills || [],
+        softSkills: student?.softSkills || [],
+        languages: student?.languages || [],
+        periodId: student?.periodId || null,
+        periodName: student?.InternshipPeriod?.name || '',
+        internshipDuration: formatInternshipDuration(student?.InternshipPeriod),
+        cvStatus: options.cvStatus || 'Chưa có',
+        internshipDocumentStatus: options.internshipDocumentStatus || 'Chưa có',
+        documentLink: options.documentLink || '',
+        reportProgress: options.reportProgress ?? 0,
+        lastReportStatus: options.lastReportStatus || null,
+        lastReportTitle: options.lastReportTitle || '',
+        lastReportSubmittedAt: options.lastReportSubmittedAt || null,
+        progressData: options.progressData || null,
+        progressPercent: options.progressData?.progressPercent ?? 0,
+        taskSummary: options.progressData?.taskSummary || { total: 0, completed: 0, inProgress: 0, pending: 0 },
+        reportSummary: options.progressData?.reportSummary || { total: 0, submitted: 0, draft: 0, weeklyCount: 0, weeklySubmitted: 0 },
+        nextDeadline: options.progressData?.nextDeadline || null,
+        latestReport: options.progressData?.latestReport || null,
+        totalWeeks: options.progressData?.totalWeeks ?? 0,
+        weeksCompleted: options.progressData?.weeksCompleted ?? 0,
+        mentorDetails: options.mentorDetails || null
+    };
+};
 
 const getMyProfile = async (userId) => {
     const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role', 'profileImageUrl'] });
     if (!shouldCreateStudentProfile(user)) {
+        await resolveProfileImageUrls(null, user);
         return buildProfilePayload(null, user, {
             cvStatus: 'Chưa có',
             internshipDocumentStatus: 'Chưa có',
@@ -90,6 +155,7 @@ const getMyProfile = async (userId) => {
     }
 
     let student = await Student.findOne({ where: { userId } });
+
     if (student?.majorId) {
         const major = await Major.findByPk(student.majorId, { attributes: ['name'] });
         student = { ...student.toJSON(), Major: major };
@@ -97,6 +163,22 @@ const getMyProfile = async (userId) => {
     if (student?.periodId) {
         const period = await InternshipPeriod.findByPk(student.periodId, { attributes: ['id', 'name', 'startDate', 'endDate'] });
         student = { ...student, InternshipPeriod: period };
+    }
+
+    let mentorDetails = null;
+    if (student?.mentorId) {
+        const mentor = await Mentor.findByPk(student.mentorId, {
+            attributes: ['id', 'fullName', 'companyName', 'phone', 'userId']
+        });
+        if (mentor) {
+            const mentorUser = mentor.userId ? await User.findByPk(mentor.userId, { attributes: ['email'] }) : null;
+            mentorDetails = {
+                mentorName: mentor.fullName || student.mentorName || '',
+                mentorCompany: mentor.companyName || student.enterpriseName || '',
+                mentorPhone: mentor.phone || '',
+                mentorEmail: mentorUser?.email || ''
+            };
+        }
     }
 
     if (!student) {
@@ -116,6 +198,8 @@ const getMyProfile = async (userId) => {
         }
     }
 
+    await resolveProfileImageUrls(student, user);
+
     let cvStatus = 'Chưa có';
     let internshipDocumentStatus = 'Chưa có';
     let documentLink = '';
@@ -123,6 +207,7 @@ const getMyProfile = async (userId) => {
     let lastReportStatus = null;
     let lastReportTitle = '';
     let lastReportSubmittedAt = null;
+    let progressData = null;
 
     try {
         const docs = await StudentDocument.findAll({ where: { studentId: student.id } });
@@ -136,6 +221,13 @@ const getMyProfile = async (userId) => {
         cvStatus = hasCv ? 'Đã cập nhật' : 'Chưa có';
         internshipDocumentStatus = hasInternship ? 'Đã cập nhật' : 'Chưa có';
         documentLink = latestDoc?.fileUrl || '';
+        if (documentLink && !String(documentLink).startsWith('http')) {
+            try {
+                documentLink = await getFileUrl(documentLink);
+            } catch (e) {
+                // ignore conversion failures
+            }
+        }
     } catch (err) {
         // ignore document status errors
     }
@@ -158,6 +250,37 @@ const getMyProfile = async (userId) => {
         // ignore report progress errors
     }
 
+    try {
+        progressData = await studentProgressService.getStudentProgress(userId, student.periodId);
+    } catch (err) {
+        // ignore progress calculation errors
+    }
+
+    // Convert stored profileImageUrl keys to usable URLs when needed
+    try {
+        const { getFileUrl } = require('../config/s3');
+        if (student && student.profileImageUrl && !String(student.profileImageUrl).startsWith('http')) {
+            console.log('getMyProfile: converting student.profileImageUrl key:', student.profileImageUrl);
+            try {
+                student.profileImageUrl = await getFileUrl(student.profileImageUrl);
+            } catch (e) {
+                console.error('getMyProfile: failed to convert student.profileImageUrl', student.profileImageUrl, e?.message || e);
+            }
+            console.log('getMyProfile: converted student.profileImageUrl to:', student.profileImageUrl);
+        }
+        if (user && user.profileImageUrl && !String(user.profileImageUrl).startsWith('http')) {
+            console.log('getMyProfile: converting user.profileImageUrl key:', user.profileImageUrl);
+            try {
+                user.profileImageUrl = await getFileUrl(user.profileImageUrl);
+            } catch (e) {
+                console.error('getMyProfile: failed to convert user.profileImageUrl', user.profileImageUrl, e?.message || e);
+            }
+            console.log('getMyProfile: converted user.profileImageUrl to:', user.profileImageUrl);
+        }
+    } catch (e) {
+        console.error('getMyProfile: getFileUrl helper failed', e?.message || e);
+    }
+
     return buildProfilePayload(student, user, {
         cvStatus,
         internshipDocumentStatus,
@@ -165,7 +288,9 @@ const getMyProfile = async (userId) => {
         reportProgress,
         lastReportStatus,
         lastReportTitle,
-        lastReportSubmittedAt
+        lastReportSubmittedAt,
+        progressData,
+        mentorDetails
     });
 };
 
@@ -279,27 +404,49 @@ const updateMyProfile = async (userId, payload) => {
 
 const getProfileDocuments = async (userId) => {
     const student = await ensureStudentProfile(userId);
-    return StudentDocument.findAll({ where: { studentId: student.id } });
+    const documents = await StudentDocument.findAll({ where: { studentId: student.id } });
+    return Promise.all(documents.map(async (doc) => {
+        const record = doc.toJSON();
+        if (record.fileUrl && !String(record.fileUrl).startsWith('http')) {
+            try {
+                record.fileUrl = await getFileUrl(record.fileUrl);
+            } catch (error) {
+                // ignore conversion failures
+            }
+        }
+        return record;
+    }));
 };
 
 const uploadProfileDocument = async (userId, payload, file) => {
     const student = await ensureStudentProfile(userId);
 
-    const url = await uploadFile({
+    const { url, key } = await uploadFile({
         fileBuffer: file.buffer,
         fileName: file.originalname,
         contentType: file.mimetype,
-        folder: `student-documents/${student.id}`
+        folder: `student-documents/${student.id}`,
+        returnMetadata: true
     });
 
-    return StudentDocument.create({
+    const document = await StudentDocument.create({
         studentId: student.id,
         title: payload.title || file.originalname,
         category: payload.category || 'HỒ SƠ',
         fileName: file.originalname,
-        fileUrl: url,
+        fileUrl: key || url,
         fileType: file.mimetype
     });
+
+    const record = document.toJSON();
+    if (record.fileUrl && !String(record.fileUrl).startsWith('http')) {
+        try {
+            record.fileUrl = await getFileUrl(record.fileUrl);
+        } catch (error) {
+            // ignore conversion failures
+        }
+    }
+    return record;
 };
 
 const deleteProfileDocument = async (userId, documentId) => {
@@ -308,20 +455,11 @@ const deleteProfileDocument = async (userId, documentId) => {
     const document = await StudentDocument.findOne({ where: { id: documentId, studentId: student.id } });
     if (!document) throw new Error('Tài liệu không tồn tại');
 
-    const url = document.fileUrl || '';
-    const useLocal = String(process.env.USE_LOCAL_UPLOAD || '').toLowerCase() === 'true';
-    if (useLocal) {
-        // url like http://localhost:5000/uploads/<key>
-        const m = url.match(/\/uploads\/(.+)$/);
-        if (m && m[1]) {
-            await deleteFile(m[1]);
-        }
-    } else {
-        const match = url.match(`https://${process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME}\\.s3\\.${process.env.AWS_REGION || 'ap-southeast-1'}\\.amazonaws\\.com/(.+)`);
-        if (match && match[1]) {
-            await deleteFile(match[1]);
-        }
+    const key = extractStorageKeyFromUrl(document.fileUrl || '');
+    if (!key) {
+        throw new Error('Không xác định được file để xóa');
     }
+    await deleteFile(key);
 
     await document.destroy();
     return true;
@@ -348,18 +486,32 @@ const ensureStudentProfile = async (userId, fallbackName = '') => {
 const uploadProfileImage = async (userId, file) => {
     const student = await ensureStudentProfile(userId);
 
-    const url = await uploadFile({
+    const { url, key } = await uploadFile({
         fileBuffer: file.buffer,
         fileName: file.originalname,
         contentType: file.mimetype,
-        folder: `student-profile/${student.id}`
+        folder: `student-profile/${student.id}`,
+        returnMetadata: true
     });
 
+    console.log('student.uploadProfileImage: uploadFile returned', { key, url });
+
     const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role', 'profileImageUrl'] });
-    await student.update({ profileImageUrl: url });
-    await user.update({ profileImageUrl: url });
+    await student.update({ profileImageUrl: key });
+    await user.update({ profileImageUrl: key });
 
     // Return the same profile payload as getMyProfile so frontend gets full period and internship info
+    return getMyProfile(userId);
+};
+
+const saveProfileImageKey = async (userId, key) => {
+    const student = await ensureStudentProfile(userId);
+    const user = await User.findByPk(userId, { attributes: ['id', 'email', 'role', 'profileImageUrl'] });
+
+    // store the key (not a signed URL) so getMyProfile can generate signed URL for response
+    await student.update({ profileImageUrl: key });
+    await user.update({ profileImageUrl: key });
+
     return getMyProfile(userId);
 };
 
@@ -478,11 +630,49 @@ const assignMentor = async (studentId, mentorId, actor) => {
             enterpriseName: mentor.companyName
         }, { transaction });
 
+        const [conversation] = await ChatConversation.findOrCreate({
+            where: {
+                internshipId: internship.id,
+                studentUserId: Number(student.userId),
+                mentorUserId: Number(mentor.userId)
+            },
+            defaults: {
+                status: 'ACTIVE'
+            },
+            transaction
+        });
+
+        if (conversation.status !== 'ACTIVE') {
+            conversation.status = 'ACTIVE';
+            await conversation.save({ transaction });
+        }
+
         if (oldMentorId && Number(oldMentorId) !== Number(mentor.id)) {
             await ChatConversation.update(
                 { status: 'ARCHIVED' },
-                { where: { internshipId: internship.id, status: 'ACTIVE' }, transaction }
+                { where: { internshipId: internship.id, status: 'ACTIVE', mentorUserId: { [Op.ne]: mentor.userId } }, transaction }
             );
+        }
+
+        try {
+            await Promise.all([
+                notificationService.createNotification({
+                    userId: mentor.userId,
+                    title: 'Bạn có sinh viên mới',
+                    message: `Sinh viên ${student.fullName || student.studentCode} đã được phân công cho bạn.`,
+                    type: 'MENTOR_ASSIGN',
+                    data: { studentId: student.id, internshipId: internship.id, conversationId: conversation.id }
+                }),
+                notificationService.createNotification({
+                    userId: student.userId,
+                    title: 'Bạn đã được phân công mentor',
+                    message: `Mentor ${mentor.fullName} đã được giao hỗ trợ bạn trong kỳ thực tập này.`,
+                    type: 'STUDENT_ASSIGN',
+                    data: { mentorId: mentor.id, internshipId: internship.id, conversationId: conversation.id }
+                })
+            ]);
+        } catch (notifyError) {
+            console.error('Mentor assignment notification error:', notifyError.message || notifyError);
         }
 
         return student;

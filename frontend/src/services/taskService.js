@@ -40,5 +40,15 @@ export const submitTask = async (id, payload) => {
   if (payload.status) formData.append('status', payload.status);
   if (payload.file) formData.append('file', payload.file);
   const res = await apiClient.post(`/tasks/${id}/submit`, formData);
-  return res.data;
+  return res.data?.data ?? res.data;
+};
+
+export const addTaskComment = async (id, content) => {
+  const res = await apiClient.post(`/tasks/${id}/comments`, { content });
+  return res.data?.data ?? res.data;
+};
+
+export const saveMentorNote = async (id, note) => {
+  const res = await apiClient.post(`/tasks/${id}/mentor-note`, { note });
+  return res.data?.data ?? res.data;
 };

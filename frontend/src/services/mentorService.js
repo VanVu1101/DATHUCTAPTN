@@ -25,7 +25,12 @@ export const getAssignedStudents = async () => {
   return response.data?.data || [];
 };
 
-export const getCompanyStudents = async () => {
-  const response = await apiClient.get('/mentors/company-students');
+export const getCompanyStudents = async (params = {}) => {
+  const response = await apiClient.get('/mentors/company-students', { params });
+  return response.data?.data || [];
+};
+
+export const getAssignableStudents = async (params = {}) => {
+  const response = await apiClient.get('/mentors/assignable-students', { params });
   return response.data?.data || [];
 };

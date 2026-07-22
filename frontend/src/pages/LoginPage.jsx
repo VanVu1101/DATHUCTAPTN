@@ -6,13 +6,33 @@ import '../App.css';
 
 function LoginPage() {
   const [mode, setMode] = useState('login');
-  const [form, setForm] = useState({ email: '', password: '', confirmPassword: '', role: 'STUDENT' });
+  const [form, setForm] = useState({ email: '', password: '', confirmPassword: '' });
   const [message, setMessage] = useState('');
+  const [passwordHint, setPasswordHint] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
+
+    if (name === 'password' && mode === 'register') {
+      const checks = [
+        { label: '8+ ký tự', ok: value.length >= 8 },
+        { label: 'Có chữ hoa', ok: /[A-Z]/.test(value) },
+        { label: 'Có chữ thường', ok: /[a-z]/.test(value) },
+        { label: 'Có số', ok: /[0-9]/.test(value) },
+        { label: 'Có ký tự đặc biệt', ok: /[^A-Za-z0-9]/.test(value) }
+      ];
+      const passed = checks.filter((item) => item.ok).length;
+      if (!value) {
+        setPasswordHint('');
+      } else if (passed === checks.length) {
+        setPasswordHint('Mật khẩu mạnh');
+      } else {
+        setPasswordHint(`Còn thiếu: ${checks.filter((item) => !item.ok).map((item) => item.label).join(', ')}`);
+      }
+    }
   };
 
   const storeAuthUser = (authUser, displayName) => {
@@ -37,8 +57,9 @@ function LoginPage() {
       .replace(/\b\w/g, (char) => char.toUpperCase());
 
     if (mode === 'register') {
-      if (form.password.length < 6) {
-        setMessage('Mật khẩu phải có ít nhất 6 ký tự');
+      const strongPasswordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+      if (!strongPasswordPattern.test(form.password)) {
+        setMessage('Mật khẩu phải có ít nhất 8 ký tự, bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt');
         return;
       }
 
@@ -48,10 +69,10 @@ function LoginPage() {
       }
 
       try {
-        const res = await register({ email: form.email, password: form.password, role: form.role });
+        const res = await register({ email: form.email, password: form.password });
           if (res && res.success && res.data && res.data.token) {
             localStorage.setItem('token', res.data.token);
-            storeAuthUser(res.data.user || { email: form.email, role: form.role }, displayName);
+            storeAuthUser(res.data.user || { email: form.email, role: 'STUDENT' }, displayName);
             try {
               const prof = await getMyProfile();
               if (prof && prof.success) {
@@ -137,11 +158,7 @@ function LoginPage() {
             {mode === 'register' && (
               <>
                 <input name="confirmPassword" type="password" placeholder="Xác nhận mật khẩu" value={form.confirmPassword} onChange={handleChange} required />
-                <select name="role" value={form.role} onChange={handleChange}>
-                  <option value="STUDENT">Sinh viên</option>
-                  <option value="ENTERPRISE">Doanh nghiệp</option>
-                  <option value="ADMIN">Quản trị viên</option>
-                </select>
+                {passwordHint && <p className={`form-message ${passwordHint === 'Mật khẩu mạnh' ? 'success' : ''}`}>{passwordHint}</p>}
               </>
             )}
 

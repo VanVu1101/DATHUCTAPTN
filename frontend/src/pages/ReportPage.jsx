@@ -17,6 +17,8 @@ import {
 import { getAllPeriods } from '../services/periodService';
 import { getMyProfile } from '../services/studentService';
 import { getEvaluationByInternship } from '../services/evaluationService';
+import PageHeader from '../components/PageHeader';
+import { notifyError, notifySuccess } from '../utils/toast';
 
 const resolveFileUrl = (value) => {
   if (!value) return '';
@@ -126,10 +128,12 @@ function ReportPage() {
     try {
       await reviewReport(selectedReviewReport.id, payload);
       setMessage('Đã cập nhật trạng thái báo cáo.');
+      notifySuccess('Đã cập nhật trạng thái báo cáo');
       closeReviewModal();
       loadReports();
     } catch (error) {
       setMessage(error.response?.data?.message || 'Không duyệt được báo cáo.');
+      notifyError(error.response?.data?.message || 'Không duyệt được báo cáo.');
     }
   };
 
@@ -138,9 +142,11 @@ function ReportPage() {
     try {
       await deleteWeeklyReport(reportId);
       setMessage('Đã xóa tuần báo cáo.');
+      notifySuccess('Đã xóa tuần báo cáo');
       loadReports();
     } catch (error) {
       setMessage(error.response?.data?.message || 'Xóa tuần báo cáo thất bại.');
+      notifyError(error.response?.data?.message || 'Xóa tuần báo cáo thất bại.');
     }
   };
 
@@ -273,6 +279,10 @@ function ReportPage() {
 
   return (
     <div className="page-shell report-page">
+      <PageHeader
+        title="Báo cáo tiến độ"
+        description={user?.role === 'ADMIN' ? 'Admin tạo báo cáo tuần, sinh viên nộp file theo từng tuần.' : 'Theo dõi trạng thái báo cáo và nộp tệp đúng định dạng.'}
+      />
       <div className="card report-hero">
         <div className="card-header report-hero-header">
           <div>
@@ -334,11 +344,14 @@ function ReportPage() {
           </div>
 
           {loading ? (
-            <p>Đang tải...</p>
+            <div className="loading-grid">
+              <div className="skeleton" style={{ height: 64, borderRadius: 14 }} />
+              <div className="skeleton" style={{ height: 96, borderRadius: 14 }} />
+            </div>
           ) : filteredWeeklyReports.length === 0 && standaloneReports.length === 0 ? (
-            <>
+            <div className="empty-state-card">
               <p>{showMissingPeriodNotice ? missingPeriodMessage : 'Không tìm thấy mẫu báo cáo tuần nào để nộp.'}</p>
-            </>
+            </div>
           ) : (
             <>
               {filteredWeeklyReports.length > 0 && (

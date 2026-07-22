@@ -1,3 +1,4 @@
+const sequelize = require('../config/database');
 const Task = require('../models/task');
 const Student = require('../models/student');
 const Internship = require('../models/internship');
@@ -5,8 +6,61 @@ const InternshipPeriod = require('../models/internshipPeriod');
 const User = require('../models/user');
 const Mentor = require('../models/mentor');
 const Notification = require('../models/notification');
+const { notifyTaskAssigned, notifyDeadlineSoon, notifyDeadlineRemindersForStudent } = require('./automation');
+
+const VALID_TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE'];
+const VALID_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH'];
+
+const normalizeTaskPayload = (data = {}) => ({
+    title: data.title?.trim?.() || '',
+    description: data.description || '',
+    deadline: data.deadline || null,
+    assignedAt: data.assignedAt || null,
+    category: data.category || null,
+    taskCode: data.taskCode || null,
+    priority: VALID_PRIORITIES.includes(data.priority) ? data.priority : 'MEDIUM',
+    status: VALID_TASK_STATUSES.includes(data.status) ? data.status : 'TODO',
+    internshipId: data.internshipId || null,
+    studentId: data.studentId || null
+});
+
+const ensureTaskTableColumns = async () => {
+    const addColumnIfMissing = async (columnName, definition) => {
+        try {
+            const [rows] = await sequelize.query(`SHOW COLUMNS FROM tasks LIKE '${columnName}'`);
+            if (rows && rows.length > 0) return;
+            await sequelize.query(`ALTER TABLE tasks ADD COLUMN \`${columnName}\` ${definition}`);
+        } catch (error) {
+            const message = error?.message || '';
+            if (!/duplicate column|already exists/i.test(message)) {
+                console.error(`ensureTaskTableColumns (${columnName}) error:`, message);
+            }
+        }
+    };
+
+    await addColumnIfMissing('mentorNote', 'TEXT NULL');
+    await addColumnIfMissing('comments', 'JSON NULL');
+    await addColumnIfMissing('activityLog', 'JSON NULL');
+};
+
+const buildActivityEntry = (action, details = {}, actor = {}) => ({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    action,
+    actorId: actor.id || null,
+    actorRole: actor.role || null,
+    details,
+    createdAt: new Date().toISOString()
+});
+
+const appendTaskActivity = async (task, action, details = {}, actor = {}) => {
+    const nextLog = Array.isArray(task.activityLog) ? [...task.activityLog] : [];
+    nextLog.push(buildActivityEntry(action, details, actor));
+    await task.update({ activityLog: nextLog });
+    return nextLog;
+};
 
 const getTaskById = async (id) => {
+    await ensureTaskTableColumns();
     const task = await Task.findByPk(id, {
         include: [
             { model: Student, attributes: ['id', 'fullName', 'studentCode'] },
@@ -20,6 +74,7 @@ const getTaskById = async (id) => {
 };
 
 const getTasks = async (filters = {}) => {
+    await ensureTaskTableColumns();
     const where = {};
     if (filters.studentId) where.studentId = filters.studentId;
     if (filters.internshipId) where.internshipId = filters.internshipId;
@@ -43,6 +98,7 @@ const getTasks = async (filters = {}) => {
 };
 
 const getMyTasks = async (userId, periodId = null, status = null) => {
+    await ensureTaskTableColumns();
     const student = await Student.findOne({ where: { userId } });
     if (!student) {
         throw new Error('Không tìm thấy sinh viên');
@@ -60,6 +116,8 @@ const getMyTasks = async (userId, periodId = null, status = null) => {
         }
     ];
 
+    await notifyDeadlineRemindersForStudent(student.id);
+
     return Task.findAll({
         where,
         include,
@@ -67,16 +125,19 @@ const getMyTasks = async (userId, periodId = null, status = null) => {
     });
 };
 
-const createTask = async (data) => {
-    if (!data.title) throw new Error('Tiêu đề nhiệm vụ là bắt buộc');
-    if (!data.studentId) throw new Error('Sinh viên nhận nhiệm vụ là bắt buộc');
+const createTask = async (data, actor = {}) => {
+    await ensureTaskTableColumns();
+    const payload = normalizeTaskPayload(data);
 
-    const student = await Student.findByPk(data.studentId);
+    if (!payload.title) throw new Error('Tiêu đề nhiệm vụ là bắt buộc');
+    if (!payload.studentId) throw new Error('Sinh viên nhận nhiệm vụ là bắt buộc');
+
+    const student = await Student.findByPk(payload.studentId);
     if (!student) {
         throw new Error('Không tìm thấy sinh viên này');
     }
 
-    let internshipId = data.internshipId;
+    let internshipId = payload.internshipId;
     if (!internshipId) {
         const internship = await Internship.findOne({ where: { studentId: student.id }, order: [['createdAt', 'DESC']] });
         internshipId = internship?.id || null;
@@ -101,7 +162,7 @@ const createTask = async (data) => {
 
         const createdInternship = await Internship.create({
             studentId: student.id,
-            periodId: data.periodId || student.periodId,
+            periodId: payload.periodId || student.periodId,
             positionId: position.id,
             mentorId: mentor.id,
             status: 'IN_PROGRESS'
@@ -110,33 +171,47 @@ const createTask = async (data) => {
         internshipId = createdInternship.id;
     }
 
-    return Task.create({
-        title: data.title,
-        description: data.description || '',
-        deadline: data.deadline || null,
-        assignedAt: data.assignedAt || null,
-        category: data.category || null,
-        taskCode: data.taskCode || null,
-        priority: data.priority || 'MEDIUM',
-        status: data.status || 'TODO',
+    const createdTask = await Task.create({
+        title: payload.title,
+        description: payload.description,
+        deadline: payload.deadline,
+        assignedAt: payload.assignedAt,
+        category: payload.category,
+        taskCode: payload.taskCode,
+        priority: payload.priority,
+        status: payload.status,
         internshipId,
         studentId: student.id
     });
+
+    await notifyTaskAssigned(createdTask);
+    await notifyDeadlineSoon(createdTask);
+    await appendTaskActivity(createdTask, 'TASK_CREATED', { title: payload.title, studentId: student.id }, actor);
+
+    return createdTask;
 };
 
-const updateTask = async (id, data) => {
+const updateTask = async (id, data, actor = {}) => {
+    await ensureTaskTableColumns();
     const task = await getTaskById(id);
-    return task.update({
-        title: data.title ?? task.title,
-        description: data.description ?? task.description,
-        deadline: data.deadline ?? task.deadline,
-        assignedAt: data.assignedAt ?? task.assignedAt,
-        category: data.category ?? task.category,
-        taskCode: data.taskCode ?? task.taskCode,
-        priority: data.priority ?? task.priority,
-        status: data.status ?? task.status,
-        studentId: data.studentId ?? task.studentId
+    const payload = normalizeTaskPayload({ ...task.toJSON(), ...data });
+
+    const updatedTask = await task.update({
+        title: payload.title ?? task.title,
+        description: payload.description ?? task.description,
+        deadline: payload.deadline ?? task.deadline,
+        assignedAt: payload.assignedAt ?? task.assignedAt,
+        category: payload.category ?? task.category,
+        taskCode: payload.taskCode ?? task.taskCode,
+        priority: payload.priority ?? task.priority,
+        status: payload.status ?? task.status,
+        studentId: payload.studentId ?? task.studentId
     });
+
+    await appendTaskActivity(updatedTask, 'TASK_UPDATED', { changedFields: Object.keys(data || {}) }, actor);
+    await notifyDeadlineSoon(updatedTask);
+
+    return updatedTask;
 };
 
 const deleteTask = async (id) => {
@@ -145,7 +220,37 @@ const deleteTask = async (id) => {
     return true;
 };
 
+const addTaskComment = async (taskId, userId, role, content) => {
+    await ensureTaskTableColumns();
+    const task = await getTaskById(taskId);
+    const normalized = String(content || '').trim();
+    if (!normalized) throw new Error('Nội dung bình luận là bắt buộc');
+
+    const comments = Array.isArray(task.comments) ? [...task.comments] : [];
+    comments.push({
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        authorId: userId,
+        authorRole: role || 'STUDENT',
+        content: normalized,
+        createdAt: new Date().toISOString()
+    });
+
+    await task.update({ comments });
+    await appendTaskActivity(task, 'COMMENT_ADDED', { content: normalized }, { id: userId, role });
+    return task.reload();
+};
+
+const saveMentorNote = async (taskId, userId, role, note) => {
+    await ensureTaskTableColumns();
+    const task = await getTaskById(taskId);
+    const normalized = String(note || '').trim();
+    const updatedTask = await task.update({ mentorNote: normalized || null });
+    await appendTaskActivity(updatedTask, 'MENTOR_NOTE_UPDATED', { note: normalized || '' }, { id: userId, role });
+    return updatedTask;
+};
+
 const submitTask = async (taskId, userId, payload = {}) => {
+    await ensureTaskTableColumns();
     const student = await Student.findOne({ where: { userId } });
     if (!student) {
         throw new Error('Không tìm thấy sinh viên');
@@ -156,8 +261,8 @@ const submitTask = async (taskId, userId, payload = {}) => {
         throw new Error('Bạn không có quyền nộp nhiệm vụ này');
     }
 
-    const nextStatus = payload.status || 'REVIEW';
-    if (!['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE'].includes(nextStatus)) {
+    const nextStatus = VALID_TASK_STATUSES.includes(payload.status) ? payload.status : 'REVIEW';
+    if (!VALID_TASK_STATUSES.includes(nextStatus)) {
         throw new Error('Trạng thái nhiệm vụ không hợp lệ');
     }
 
@@ -169,6 +274,8 @@ const submitTask = async (taskId, userId, payload = {}) => {
         fileName: payload.fileName || task.fileName,
         fileType: payload.fileType || task.fileType
     });
+
+    await appendTaskActivity(updatedTask, 'TASK_SUBMITTED', { comment: payload.comment || '' }, { id: userId, role: 'STUDENT' });
 
     const notifications = [];
     const adminUsers = await User.findAll({ where: { role: 'ADMIN' } });
@@ -217,5 +324,7 @@ module.exports = {
     createTask,
     updateTask,
     deleteTask,
-    submitTask
+    submitTask,
+    addTaskComment,
+    saveMentorNote
 };

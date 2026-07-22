@@ -22,6 +22,18 @@ const CheckIn = sequelize.define('CheckIn', {
         type: DataTypes.TEXT,
         allowNull: true
     },
+    photoUrl: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    geoLat: {
+        type: DataTypes.FLOAT,
+        allowNull: true
+    },
+    geoLng: {
+        type: DataTypes.FLOAT,
+        allowNull: true
+    },
     internshipId: {
         type: DataTypes.INTEGER,
         allowNull: false

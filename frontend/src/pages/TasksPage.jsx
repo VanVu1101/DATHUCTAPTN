@@ -1,10 +1,12 @@
 import '../App.css';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getMyTasks, getAllTasks, createTask, updateTask, deleteTask, submitTask } from '../services/taskService';
+import { getMyTasks, getAllTasks, createTask, updateTask, deleteTask, submitTask, addTaskComment, saveMentorNote } from '../services/taskService';
 import { getStudents } from '../services/studentService';
 import StudentAutocomplete from '../components/StudentAutocomplete';
 import { getAllPeriods } from '../services/periodService';
+import PageHeader from '../components/PageHeader';
+import { notifyError, notifySuccess } from '../utils/toast';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
 
@@ -72,6 +74,12 @@ function TasksPage() {
   const [submissionComment, setSubmissionComment] = useState('');
   const [selectedTask, setSelectedTask] = useState(null);
   const [selectedTaskStatus, setSelectedTaskStatus] = useState('TODO');
+  const [submitModalTask, setSubmitModalTask] = useState(null);
+  const [submittingTask, setSubmittingTask] = useState(false);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [mentorNoteDraft, setMentorNoteDraft] = useState('');
+  const [savingComment, setSavingComment] = useState(false);
+  const [savingMentorNote, setSavingMentorNote] = useState(false);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -180,14 +188,17 @@ function TasksPage() {
       if (editTask) {
         await updateTask(editTask.id, payload);
         setMessage('Cập nhật nhiệm vụ thành công');
+        notifySuccess('Cập nhật nhiệm vụ thành công');
       } else {
         await createTask(payload);
         setMessage('Tạo nhiệm vụ thành công');
+        notifySuccess('Tạo nhiệm vụ thành công');
       }
       resetForm();
       loadInitialData();
     } catch (error) {
       setMessage(error.response?.data?.message || 'Lỗi khi lưu nhiệm vụ');
+      notifyError(error.response?.data?.message || 'Lỗi khi lưu nhiệm vụ');
     }
   };
 
@@ -196,41 +207,67 @@ function TasksPage() {
     try {
       await deleteTask(id);
       setMessage('Đã xóa nhiệm vụ');
+      notifySuccess('Đã xóa nhiệm vụ');
       loadInitialData();
     } catch (error) {
       setMessage(error.response?.data?.message || 'Xóa nhiệm vụ thất bại');
+      notifyError(error.response?.data?.message || 'Xóa nhiệm vụ thất bại');
     }
   };
 
-  const handleSubmit = async (task) => {
-    if (!uploadFile && !submissionComment) {
+  const handleSubmit = (task) => {
+    if (!task) return;
+    setSubmitModalTask(task);
+    setSubmissionComment('');
+    setUploadFile(null);
+  };
+
+  const closeSubmitModal = () => {
+    setSubmitModalTask(null);
+    setUploadFile(null);
+    setSubmissionComment('');
+  };
+
+  const handleSubmitConfirm = async (e) => {
+    e?.preventDefault();
+    if (!submitModalTask) return;
+    if (!uploadFile && !submissionComment.trim()) {
       setMessage('Vui lòng thêm file hoặc ghi chú nộp.');
       return;
     }
 
     try {
-      const result = await submitTask(task.id, {
+      setSubmittingTask(true);
+      const result = await submitTask(submitModalTask.id, {
         status: 'REVIEW',
         comment: submissionComment,
         file: uploadFile
       });
-      setMessage(`Nộp bài thành công${result?.data?.fileName ? `: ${result.data.fileName}` : ''}`);
-      setUploadFile(null);
-      setSubmissionComment('');
+      const successMessage = `Nộp bài thành công${result?.fileName ? `: ${result.fileName}` : ''}`;
+      setMessage(successMessage);
+      notifySuccess(successMessage);
+      closeSubmitModal();
       loadInitialData();
     } catch (error) {
       setMessage(error.response?.data?.message || 'Nộp nhiệm vụ thất bại');
+      notifyError(error.response?.data?.message || 'Nộp nhiệm vụ thất bại');
+    } finally {
+      setSubmittingTask(false);
     }
   };
 
   const handleOpenTaskDetails = (task) => {
     setSelectedTask(task);
     setSelectedTaskStatus(task.status || 'TODO');
+    setCommentDraft('');
+    setMentorNoteDraft(task.mentorNote || '');
   };
 
   const handleCloseTaskDetails = () => {
     setSelectedTask(null);
     setSelectedTaskStatus('TODO');
+    setCommentDraft('');
+    setMentorNoteDraft('');
   };
 
   const handleStatusSave = async () => {
@@ -238,10 +275,50 @@ function TasksPage() {
     try {
       await updateTask(selectedTask.id, { status: selectedTaskStatus });
       setMessage('Cập nhật trạng thái nhiệm vụ thành công');
+      notifySuccess('Cập nhật trạng thái nhiệm vụ thành công');
       loadInitialData();
       handleCloseTaskDetails();
     } catch (error) {
       setMessage(error.response?.data?.message || 'Cập nhật trạng thái thất bại');
+      notifyError(error.response?.data?.message || 'Cập nhật trạng thái thất bại');
+    }
+  };
+
+  const handleCommentSave = async (e) => {
+    e?.preventDefault();
+    if (!selectedTask || !commentDraft.trim()) return;
+
+    try {
+      setSavingComment(true);
+      const refreshed = await addTaskComment(selectedTask.id, commentDraft.trim());
+      setSelectedTask(refreshed);
+      setCommentDraft('');
+      setMessage('Đã thêm bình luận');
+      notifySuccess('Đã thêm bình luận');
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Không thể thêm bình luận');
+      notifyError(error.response?.data?.message || 'Không thể thêm bình luận');
+    } finally {
+      setSavingComment(false);
+    }
+  };
+
+  const handleMentorNoteSave = async (e) => {
+    e?.preventDefault();
+    if (!selectedTask) return;
+
+    try {
+      setSavingMentorNote(true);
+      const refreshed = await saveMentorNote(selectedTask.id, mentorNoteDraft.trim());
+      setSelectedTask(refreshed);
+      setMentorNoteDraft(refreshed?.mentorNote || '');
+      setMessage('Đã lưu ghi chú mentor');
+      notifySuccess('Đã lưu ghi chú mentor');
+    } catch (error) {
+      setMessage(error.response?.data?.message || 'Không thể lưu ghi chú mentor');
+      notifyError(error.response?.data?.message || 'Không thể lưu ghi chú mentor');
+    } finally {
+      setSavingMentorNote(false);
     }
   };
 
@@ -323,10 +400,15 @@ function TasksPage() {
     return { todo, inProgress, review, done };
   }, [filteredTasks]);
 
-  const pendingTask = tasks.find((task) => task.status !== 'REVIEW' && task.status !== 'DONE');
+  const selectedTaskComments = Array.isArray(selectedTask?.comments) ? selectedTask.comments : [];
+  const selectedTaskActivity = Array.isArray(selectedTask?.activityLog) ? selectedTask.activityLog : [];
 
   return (
     <div className="page-shell tasks-page">
+      <PageHeader
+        title="Quản lý nhiệm vụ"
+        description={isAdmin ? 'Admin có thể tạo, sửa, xóa nhiệm vụ cho sinh viên.' : 'Theo dõi các nhiệm vụ và trạng thái nộp của bạn.'}
+      />
       <div className="task-header card">
         <div>
           <h1>Quản lý nhiệm vụ</h1>
@@ -478,20 +560,7 @@ function TasksPage() {
             {!isAdmin ? (
               <section className="card submission-card">
                 <h3>Nộp nhiệm vụ</h3>
-                <label className="profile-field">
-                  <span>Ghi chú</span>
-                  <textarea value={submissionComment} onChange={(e) => setSubmissionComment(e.target.value)} rows={3} placeholder="Nhập ghi chú khi nộp" />
-                </label>
-                <label className="profile-field">
-                  <span>Đính kèm file</span>
-                  <input type="file" onChange={handleFileChange} />
-                  {uploadFile && <small>{uploadFile.name}</small>}
-                </label>
-                <div className="button-row">
-                  <button className="btn" type="button" onClick={() => pendingTask && handleSubmit(pendingTask)} disabled={!pendingTask}>
-                    {pendingTask ? 'Nộp nhiệm vụ' : 'Không có nhiệm vụ để nộp'}
-                  </button>
-                </div>
+                <p className="subtle-text">Bạn có thể mở chi tiết bất kỳ nhiệm vụ nào rồi bấm “Nộp nhiệm vụ này” ở trong popup.</p>
               </section>
             ) : (
               <section className="card submission-card">
@@ -572,6 +641,35 @@ function TasksPage() {
         </div>
       </section>
 
+      {submitModalTask && (
+        <div className="modal-backdrop" onClick={closeSubmitModal}>
+          <div className="modal compact-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h2>Nộp nhiệm vụ nhanh</h2>
+                <p className="modal-note">{submitModalTask.title}</p>
+              </div>
+              <button className="modal-close" type="button" onClick={closeSubmitModal}>×</button>
+            </div>
+            <form className="form-stack" onSubmit={handleSubmitConfirm}>
+              <label className="profile-field">
+                <span>Ghi chú</span>
+                <textarea value={submissionComment} onChange={(e) => setSubmissionComment(e.target.value)} rows={3} placeholder="Nhập ghi chú khi nộp" />
+              </label>
+              <label className="profile-field">
+                <span>Đính kèm file</span>
+                <input type="file" onChange={handleFileChange} />
+                {uploadFile && <small>{uploadFile.name}</small>}
+              </label>
+              <div className="button-row">
+                <button className="btn" type="submit" disabled={submittingTask}>{submittingTask ? 'Đang nộp...' : 'Xác nhận nộp'}</button>
+                <button className="btn outline" type="button" onClick={closeSubmitModal}>Hủy</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {selectedTask && (
         <div className="modal-backdrop" onClick={closeTaskDetails}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -636,6 +734,68 @@ function TasksPage() {
                   )}
                 </div>
               </div>
+
+              <div className="task-detail-collab-grid">
+                <section className="task-detail-panel">
+                  <div className="task-detail-panel-header">
+                    <h4>Bình luận</h4>
+                    <span>{selectedTaskComments.length} phản hồi</span>
+                  </div>
+                  <form className="task-inline-form" onSubmit={handleCommentSave}>
+                    <textarea value={commentDraft} onChange={(e) => setCommentDraft(e.target.value)} rows={3} placeholder="Ghi nhận cập nhật hoặc trao đổi với mentor..." />
+                    <button className="btn" type="submit" disabled={savingComment || !commentDraft.trim()}>{savingComment ? 'Đang lưu...' : 'Gửi bình luận'}</button>
+                  </form>
+                  <div className="task-detail-list">
+                    {selectedTaskComments.length ? selectedTaskComments.map((item) => (
+                      <div key={item.id || `${item.createdAt}-${item.authorId}`} className="task-detail-item">
+                        <div className="task-detail-item-top">
+                          <strong>{item.authorRole || 'STUDENT'}</strong>
+                          <span>{item.createdAt ? new Date(item.createdAt).toLocaleString('vi-VN') : '—'}</span>
+                        </div>
+                        <p>{item.content}</p>
+                      </div>
+                    )) : <p className="empty-note">Chưa có bình luận nào.</p>}
+                  </div>
+                </section>
+
+                <section className="task-detail-panel">
+                  <div className="task-detail-panel-header">
+                    <h4>Lịch sử hoạt động</h4>
+                    <span>{selectedTaskActivity.length} mục</span>
+                  </div>
+                  <div className="task-detail-list">
+                    {selectedTaskActivity.length ? selectedTaskActivity.map((item) => (
+                      <div key={item.id || `${item.createdAt}-${item.action}`} className="task-detail-item">
+                        <div className="task-detail-item-top">
+                          <strong>{item.action}</strong>
+                          <span>{item.createdAt ? new Date(item.createdAt).toLocaleString('vi-VN') : '—'}</span>
+                        </div>
+                        <p>{item.details?.content || item.details?.comment || item.details?.title || 'Không có chi tiết'}</p>
+                      </div>
+                    )) : <p className="empty-note">Chưa có hoạt động nào.</p>}
+                  </div>
+                </section>
+              </div>
+
+              {(isAdmin || user?.role === 'MENTOR') && (
+                <section className="task-detail-panel mentor-note-panel">
+                  <div className="task-detail-panel-header">
+                    <h4>Ghi chú mentor</h4>
+                    <span>Nhắn lại cho sinh viên</span>
+                  </div>
+                  <form className="task-inline-form" onSubmit={handleMentorNoteSave}>
+                    <textarea value={mentorNoteDraft} onChange={(e) => setMentorNoteDraft(e.target.value)} rows={4} placeholder="Nhập ghi chú hướng dẫn hoặc đánh giá ngắn..." />
+                    <button className="btn" type="submit" disabled={savingMentorNote}>{savingMentorNote ? 'Đang lưu...' : 'Lưu ghi chú'}</button>
+                  </form>
+                  {selectedTask.mentorNote && <p className="mentor-note-preview">{selectedTask.mentorNote}</p>}
+                </section>
+              )}
+
+              {!isAdmin && (
+                <div className="modal-actions task-modal-actions">
+                  <button className="btn" type="button" onClick={() => handleSubmit(selectedTask)}>Nộp nhiệm vụ này</button>
+                </div>
+              )}
 
               {isAdmin && (
                 <div className="modal-actions task-modal-actions">

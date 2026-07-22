@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getNotifications, markAsRead } from '../services/notificationService';
+import PageHeader from '../components/PageHeader';
+import { notifySuccess } from '../utils/toast';
 
 function NotificationsPage() {
   const [items, setItems] = useState([]);
@@ -23,6 +25,7 @@ function NotificationsPage() {
     try {
       await markAsRead(id);
       setItems((cur) => cur.map((it) => it.id === id ? { ...it, read: true } : it));
+      notifySuccess('Đã đánh dấu thông báo là đã đọc');
     } catch (e) { console.error(e); }
   };
 
@@ -47,9 +50,17 @@ function NotificationsPage() {
 
   return (
     <div className="page-shell">
+      <PageHeader title="Thông báo" description="Theo dõi các thông báo quan trọng về báo cáo, nhiệm vụ và cập nhật hệ thống." />
       <section className="card">
         <h2>Thông báo</h2>
-        {loading ? <p>Đang tải...</p> : items.length === 0 ? <p>Không có thông báo.</p> : (
+        {loading ? (
+          <div className="loading-grid">
+            <div className="skeleton" style={{ height: 72, borderRadius: 14 }} />
+            <div className="skeleton" style={{ height: 72, borderRadius: 14 }} />
+          </div>
+        ) : items.length === 0 ? (
+          <div className="empty-state-card">Không có thông báo nào tại thời điểm này.</div>
+        ) : (
           <ul className="notification-list">
             {items.map((n) => (
               <li

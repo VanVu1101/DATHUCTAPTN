@@ -8,6 +8,7 @@ router.use(verifyToken, checkRole(['ADMIN', 'ENTERPRISE']));
 router.get('/', controller.list);
 router.get('/assigned-students', controller.assignedStudents);
 router.get('/company-students', controller.companyStudents);
+router.get('/assignable-students', controller.assignableStudents);
 router.post('/', controller.create);
 router.put('/:id', controller.update);
 router.delete('/:id', controller.remove);

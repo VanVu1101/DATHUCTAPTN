@@ -10,6 +10,16 @@ export const register = async (payload) => {
   return response.data;
 };
 
+export const getUsers = async () => {
+  const response = await apiClient.get('/users');
+  return response.data;
+};
+
+export const updateUserRole = async (id, role) => {
+  const response = await apiClient.patch(`/users/${id}/role`, { role });
+  return response.data;
+};
+
 export const changePassword = async (payload) => {
   const response = await apiClient.post('/auth/change-password', payload);
   return response.data;

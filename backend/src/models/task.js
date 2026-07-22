@@ -56,6 +56,20 @@ const Task = sequelize.define('Task', {
         type: DataTypes.TEXT,
         allowNull: true
     },
+    mentorNote: {
+        type: DataTypes.TEXT,
+        allowNull: true
+    },
+    comments: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        defaultValue: []
+    },
+    activityLog: {
+        type: DataTypes.JSON,
+        allowNull: true,
+        defaultValue: []
+    },
     submittedAt: {
         type: DataTypes.DATE,
         allowNull: true

@@ -36,7 +36,6 @@ function Sidebar() {
     { to: '/internship-info', icon: '📚', label: 'Thông tin thực tập', roles: ['STUDENT', 'ENTERPRISE'] },
     { to: '/checkin', icon: '✅', label: 'Check-in & Lịch họp' },
     { to: '/tasks', icon: '📌', label: 'Nhiệm vụ' },
-    { to: '/goals', icon: '🎯', label: 'Mục tiêu thực tập', roles: ['STUDENT'] },
     { to: '/reports', icon: '📝', label: 'Báo cáo' },
     { to: '/evaluations', icon: '⭐', label: 'Đánh giá', comingSoon: true },
     { to: '/badges', icon: '🏅', label: 'Huy hiệu', comingSoon: true },

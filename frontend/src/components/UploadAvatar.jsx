@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { uploadProfileImage } from '../services/studentService';
 
 export default function UploadAvatar() {
   const [loading, setLoading] = useState(false);
@@ -28,44 +29,40 @@ export default function UploadAvatar() {
       setLoading(true);
       setMessage('');
       
-      // Hiển thị preview
+      // Hiển thị preview tạm thời
       const reader = new FileReader();
       reader.onload = (e) => setPreview(e.target?.result);
       reader.readAsDataURL(file);
 
-      // Tạo FormData
       const formData = new FormData();
       formData.append('file', file);
 
-      // Upload lên backend
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setMessage('❌ Vui lòng đăng nhập trước');
-        setMessageType('error');
-        return;
+      const data = await uploadProfileImage(formData);
+      if (!data?.success) {
+        throw new Error(data?.message || 'Upload failed');
       }
 
-      const response = await fetch('http://localhost:5000/api/students/profile/image', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
-
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || 'Upload failed');
+      const uploadedUrl = data.data?.profileImageUrl;
+      console.log('✅ Avatar uploaded:', uploadedUrl);
+      if (uploadedUrl) {
+        setPreview(uploadedUrl);
+        try {
+          const stored = localStorage.getItem('user');
+          if (stored) {
+            const user = JSON.parse(stored);
+            user.profileImageUrl = uploadedUrl;
+            localStorage.setItem('user', JSON.stringify(user));
+          }
+        } catch (e) {
+          console.warn('Could not update localStorage user avatar', e);
+        }
       }
 
-      console.log('✅ Avatar uploaded:', data.data.profileImageUrl);
       setMessage('✅ Avatar uploaded successfully!');
       setMessageType('success');
-      
     } catch (error) {
       console.error('❌ Error:', error);
-      setMessage('❌ Upload failed: ' + error.message);
+      setMessage('❌ Upload failed: ' + (error.message || 'Lỗi không xác định'));
       setMessageType('error');
     } finally {
       setLoading(false);

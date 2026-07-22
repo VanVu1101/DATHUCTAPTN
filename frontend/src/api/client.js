@@ -16,4 +16,23 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Global response handler: if unauthorized or forbidden, clear creds and redirect to login
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    try {
+      const status = error?.response?.status;
+      if (status === 401 || status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        // navigate to login page for re-auth
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login';
+        }
+      }
+    } catch (e) {}
+    return Promise.reject(error);
+  }
+);
+
 export default apiClient;

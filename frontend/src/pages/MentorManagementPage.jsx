@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   createMentor,
   deleteMentor,
-  getCompanyStudents,
+  getAssignableStudents,
   getMentors,
   updateMentor,
 } from '../services/mentorService';
@@ -24,6 +24,7 @@ function MentorManagementPage() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState([]);
+  const [studentSearch, setStudentSearch] = useState('');
   const [assignment, setAssignment] = useState({ studentId: '', mentorId: '' });
   const storedUser = (() => {
     try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch { return {}; }
@@ -34,7 +35,10 @@ function MentorManagementPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [mentorItems, studentItems] = await Promise.all([getMentors(), getCompanyStudents()]);
+      const [mentorItems, studentItems] = await Promise.all([
+        getMentors(),
+        getAssignableStudents({ search: studentSearch, assignedStatus: 'unassigned' })
+      ]);
       setMentors(mentorItems);
       setStudents(studentItems);
     } catch (error) {
@@ -44,7 +48,7 @@ function MentorManagementPage() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [studentSearch]);
 
   const openCreate = () => {
     setEditing(null);
@@ -126,10 +130,16 @@ function MentorManagementPage() {
           <div className="card-header">
             <div>
               <h3>Phân công sinh viên</h3>
-              <p>Chỉ hiển thị sinh viên đã được Admin gán đúng tên doanh nghiệp.</p>
+              <p>Chỉ hiển thị sinh viên chưa được phân công và phù hợp với doanh nghiệp.</p>
             </div>
           </div>
           <form className="report-filters" onSubmit={assign}>
+            <input
+              type="text"
+              placeholder="Tìm sinh viên theo mã, họ tên, doanh nghiệp"
+              value={studentSearch}
+              onChange={(e) => setStudentSearch(e.target.value)}
+            />
             <select required value={assignment.studentId} onChange={(e) => setAssignment({ ...assignment, studentId: e.target.value })}>
               <option value="">Chọn sinh viên</option>
               {students.map((student) => (

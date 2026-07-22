@@ -1,16 +1,13 @@
+const sequelize = require('../config/database');
 const CheckIn = require('../models/checkIn');
 const Internship = require('../models/internship');
 const Student = require('../models/student');
 const Position = require('../models/position');
 const Mentor = require('../models/mentor');
+const InternshipPeriod = require('../models/internshipPeriod');
 const { Op } = require('sequelize');
 
 const TIME_ZONE = 'Asia/Ho_Chi_Minh';
-const CHECK_IN_START = 8 * 60 + 30;
-const ON_TIME_END = 9 * 60;
-const CHECK_IN_END = 9 * 60 + 30;
-const CHECK_OUT_START = 16 * 60 + 30;
-const CHECK_OUT_END = 17 * 60;
 
 const getVietnamNow = () => {
     const parts = Object.fromEntries(
@@ -36,11 +33,67 @@ const getVietnamNow = () => {
     };
 };
 
+const ensureCheckInTableColumns = async () => {
+    const addColumnIfMissing = async (columnName, definition) => {
+        try {
+            const [rows] = await sequelize.query(`SHOW COLUMNS FROM check_ins LIKE '${columnName}'`);
+            if (rows && rows.length > 0) return;
+            await sequelize.query(`ALTER TABLE check_ins ADD COLUMN \`${columnName}\` ${definition}`);
+        } catch (error) {
+            const message = error?.message || '';
+            if (!/duplicate column|already exists/i.test(message)) {
+                console.error(`ensureCheckInTableColumns (${columnName}) error:`, message);
+            }
+        }
+    };
+
+    await addColumnIfMissing('note', 'TEXT NULL');
+    await addColumnIfMissing('photoUrl', 'VARCHAR(255) NULL');
+    await addColumnIfMissing('geoLat', 'FLOAT NULL');
+    await addColumnIfMissing('geoLng', 'FLOAT NULL');
+    await addColumnIfMissing('checkOutTime', 'TIME NULL');
+};
+
+const getOrCreateFallbackPeriodId = async (student, preferredPeriodId = null) => {
+    if (preferredPeriodId) return preferredPeriodId;
+    if (student?.periodId) return student.periodId;
+
+    const existingPeriod = await InternshipPeriod.findOne({
+        order: [['startDate', 'DESC'], ['createdAt', 'DESC']]
+    });
+    if (existingPeriod) return existingPeriod.id;
+
+    const today = new Date();
+    const startDate = today.toISOString().slice(0, 10);
+    const endDate = new Date(today.getFullYear(), today.getMonth() + 1, today.getDate()).toISOString().slice(0, 10);
+
+    const createdPeriod = await InternshipPeriod.create({
+        name: 'Kỳ demo',
+        academicYear: `${today.getFullYear()}-${today.getFullYear() + 1}`,
+        startDate,
+        endDate,
+        description: 'Kỳ thực tập dùng cho demo'
+    });
+    return createdPeriod.id;
+};
+
+const getOrCreateFallbackMentor = async (student) => {
+    let mentor = await Mentor.findOne({ where: { userId: student.userId } });
+    if (mentor) return mentor;
+
+    mentor = await Mentor.findByPk(student.mentorId);
+    if (mentor) return mentor;
+
+    return Mentor.create({
+        fullName: student.fullName || 'Mentor Demo',
+        companyName: 'Công ty Demo',
+        userId: student.userId,
+        ownerUserId: student.userId
+    });
+};
+
 const ensureStudentInternship = async (student, periodId = null) => {
-    const targetPeriodId = periodId || student.periodId;
-    if (!targetPeriodId) {
-        throw new Error('Sinh viên chưa được gán kỳ thực tập. Vui lòng liên hệ quản trị để cập nhật kỳ thực tập trước khi check-in.');
-    }
+    const targetPeriodId = await getOrCreateFallbackPeriodId(student, periodId);
 
     let internship = await Internship.findOne({
         where: {
@@ -57,13 +110,7 @@ const ensureStudentInternship = async (student, periodId = null) => {
         position = await Position.create({ name: 'Chưa phân công', description: 'Vị trí mặc định cho sinh viên chưa phân công' });
     }
 
-    if (!student.mentorId) {
-        throw new Error('Sinh viên chưa được phân công mentor. Vui lòng liên hệ quản trị.');
-    }
-    const mentor = await Mentor.findByPk(student.mentorId);
-    if (!mentor || Number(mentor.userId) === Number(student.userId)) {
-        throw new Error('Mentor được phân công không hợp lệ.');
-    }
+    const mentor = await getOrCreateFallbackMentor(student);
 
     return Internship.create({
         studentId: student.id,
@@ -77,7 +124,6 @@ const ensureStudentInternship = async (student, periodId = null) => {
 const resolveInternship = async (userId, internshipId = null) => {
     const student = await Student.findOne({ where: { userId } });
     if (!student) throw new Error('Không tìm thấy hồ sơ sinh viên.');
-    if (!student.periodId) throw new Error('Sinh viên chưa được gán kỳ thực tập.');
 
     let internship = internshipId ? await Internship.findByPk(internshipId) : null;
     if (internship && Number(internship.studentId) !== Number(student.id)) {
@@ -96,15 +142,9 @@ const resolveInternship = async (userId, internshipId = null) => {
     return internship;
 };
 
-const createCheckIn = async ({ userId, internshipId, note }) => {
+const createCheckIn = async ({ userId, internshipId, note, photoUrl = null, geoLat = null, geoLng = null }) => {
+    await ensureCheckInTableColumns();
     const now = getVietnamNow();
-    if (now.minutes < CHECK_IN_START) {
-        throw new Error('Check-in chỉ mở từ 08:30.');
-    }
-    if (now.minutes > CHECK_IN_END) {
-        throw new Error('Đã quá 09:30. Hôm nay bạn được ghi nhận vắng mặt.');
-    }
-
     const internship = await resolveInternship(userId, internshipId);
     const existing = await CheckIn.findOne({ where: { internshipId: internship.id, date: now.date } });
     if (existing) {
@@ -113,13 +153,17 @@ const createCheckIn = async ({ userId, internshipId, note }) => {
     return CheckIn.create({
         date: now.date,
         time: now.time,
-        status: now.minutes <= ON_TIME_END ? 'PRESENT' : 'LATE',
+        status: 'PRESENT',
         internshipId: internship.id,
-        note
+        note,
+        photoUrl,
+        geoLat,
+        geoLng
     });
 };
 
 const recordCheckOut = async ({ userId, internshipId }) => {
+    await ensureCheckInTableColumns();
     const now = getVietnamNow();
     const internship = await resolveInternship(userId, internshipId);
     const checkIn = await CheckIn.findOne({
@@ -131,27 +175,20 @@ const recordCheckOut = async ({ userId, internshipId }) => {
     if (checkIn.checkOutTime) {
         throw new Error('Bạn đã check-out hôm nay.');
     }
-    if (now.minutes < CHECK_OUT_START) {
-        throw new Error('Checkout chỉ mở từ 16:30.');
-    }
-    if (now.minutes > CHECK_OUT_END) {
-        checkIn.status = 'ABSENT';
-        await checkIn.save();
-        throw new Error('Đã quá 17:00. Hôm nay bạn được ghi nhận vắng mặt.');
-    }
     checkIn.checkOutTime = now.time;
     return await checkIn.save();
 };
 
 const getCheckInsByUser = async (userId) => {
+    await ensureCheckInTableColumns();
     const student = await Student.findOne({ where: { userId } });
     if (!student) {
         return [];
     }
 
     const internships = await Internship.findAll({ where: { studentId: student.id }, attributes: ['id'] });
-    const internshipIds = internships.map((internship) => internship.id);
-    if (internshipIds.length === 0) {
+    let internshipIds = internships.map((internship) => internship.id).filter((id) => id != null);
+    if (!Array.isArray(internshipIds) || internshipIds.length === 0) {
         return [];
     }
     const currentInternship = await Internship.findOne({
@@ -163,36 +200,16 @@ const getCheckInsByUser = async (userId) => {
         attributes: ['id']
     });
 
-    const now = getVietnamNow();
-    const todayRecord = await CheckIn.findOne({
-        where: { internshipId: { [Op.in]: internshipIds }, date: now.date }
-    });
-    const isWeekday = !['Sat', 'Sun'].includes(now.weekday);
-    if (!todayRecord && isWeekday && now.minutes > CHECK_IN_END) {
-        await CheckIn.create({
-            internshipId: currentInternship?.id || internshipIds[0],
-            date: now.date,
-            time: '09:30:00',
-            status: 'ABSENT',
-            note: 'Không check-in trong khung giờ quy định'
+    try {
+        return await CheckIn.findAll({
+            where: { internshipId: internshipIds },
+            include: [{ model: Internship, include: [{ model: Student }] }],
+            order: [['createdAt', 'DESC']],
         });
-    } else if (
-        todayRecord
-        && !todayRecord.checkOutTime
-        && now.minutes > CHECK_OUT_END
-        && todayRecord.status !== 'ABSENT'
-    ) {
-        await todayRecord.update({
-            status: 'ABSENT',
-            note: 'Không checkout trong khung giờ quy định'
-        });
+    } catch (listErr) {
+        console.error('checkIn.getCheckInsByUser DB error (findAll):', listErr && listErr.message ? listErr.message : listErr, { userId, internshipIds, now });
+        return [];
     }
-
-    return CheckIn.findAll({
-        where: { internshipId: internshipIds },
-        include: [{ model: Internship, include: [{ model: Student }] }],
-        order: [['createdAt', 'DESC']],
-    });
 };
 
 const getAdminSummary = async (periodId = null) => {

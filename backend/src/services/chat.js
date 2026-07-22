@@ -41,6 +41,14 @@ const findAssignments = async (user) => {
             if (!mentor?.userId || Number(mentor.userId) === Number(user.id)) return null;
             const mentorUser = await User.findByPk(mentor.userId);
             if (!mentorUser || mentorUser.role !== 'ENTERPRISE') return null;
+            let mentorAvatar = mentorUser.profileImageUrl || null;
+            if (mentorAvatar && !String(mentorAvatar).startsWith('http')) {
+                try {
+                    mentorAvatar = await getFileUrl(mentorAvatar);
+                } catch (error) {
+                    mentorAvatar = mentorUser.profileImageUrl || null;
+                }
+            }
             return {
                 internship,
                 student,
@@ -51,7 +59,7 @@ const findAssignments = async (user) => {
                     id: Number(mentor.userId),
                     name: mentor.fullName || mentorUser.email,
                     email: mentorUser.email,
-                    avatar: mentorUser.profileImageUrl || null,
+                    avatar: mentorAvatar,
                     role: 'ENTERPRISE',
                     companyName: mentor.companyName || ''
                 }

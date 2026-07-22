@@ -6,6 +6,15 @@ const { sendPasswordResetEmail } = require('../infrastructure/mail');
 
 const passwordResetTokens = new Map();
 
+const isStrongPassword = (password) => {
+    if (!password || password.length < 8) return false;
+    if (!/[A-Z]/.test(password)) return false;
+    if (!/[a-z]/.test(password)) return false;
+    if (!/[0-9]/.test(password)) return false;
+    if (!/[^A-Za-z0-9]/.test(password)) return false;
+    return true;
+};
+
 const generateToken = (user) => {
     return jwt.sign(
         { id: user.id, role: user.role },
@@ -17,6 +26,10 @@ const generateToken = (user) => {
 const registerUser = async (email, password, role) => {
     if (!email || !password) {
         throw new Error('Vui lòng nhập email và mật khẩu');
+    }
+
+    if (!isStrongPassword(password)) {
+        throw new Error('Mật khẩu phải có ít nhất 8 ký tự, bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt');
     }
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -31,7 +44,7 @@ const registerUser = async (email, password, role) => {
     const newUser = await User.create({
         email: normalizedEmail,
         password: hashedPassword,
-        role: role || 'STUDENT'
+        role: role && ['STUDENT', 'ENTERPRISE', 'ADMIN'].includes(role) ? role : 'STUDENT'
     });
 
     const token = generateToken(newUser);

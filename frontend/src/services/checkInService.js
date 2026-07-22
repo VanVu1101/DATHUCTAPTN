@@ -54,3 +54,13 @@ export const getAdminCheckInDetail = async ({ studentId, status, periodId }) => 
   });
   return res.data?.data || { student: null, records: [] };
 };
+
+export const generateQr = async (payload) => {
+  const res = await apiClient.post('/checkins/qr/generate', payload);
+  return res.data;
+};
+
+export const redeemQr = async (token) => {
+  const res = await apiClient.post('/checkins/qr/redeem', { token });
+  return res.data;
+};

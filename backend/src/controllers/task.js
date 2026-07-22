@@ -1,9 +1,14 @@
 const taskService = require('../services/task');
 const notificationService = require('../services/notification');
+const { canManageTask, canSubmitTask } = require('../services/taskAccess');
 const Student = require('../models/student');
 
 const getTasks = async (req, res) => {
     try {
+        if (!canManageTask(req.user?.role)) {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền xem danh sách nhiệm vụ này' });
+        }
+
         const tasks = await taskService.getTasks({
             internshipId: req.query.internshipId,
             studentId: req.query.studentId,
@@ -37,8 +42,12 @@ const getTaskById = async (req, res) => {
 
 const createTask = async (req, res) => {
     try {
+        if (!canManageTask(req.user?.role)) {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền tạo nhiệm vụ' });
+        }
+
         console.log('API /api/tasks POST body:', req.body, 'user:', req.user?.id);
-        const task = await taskService.createTask(req.body);
+        const task = await taskService.createTask(req.body, { id: req.user?.id, role: req.user?.role });
                 // create notification for assigned student if present
                 try {
                     if (task && task.studentId) {
@@ -67,7 +76,11 @@ const createTask = async (req, res) => {
 
 const updateTask = async (req, res) => {
     try {
-        const task = await taskService.updateTask(req.params.id, req.body);
+        if (!canManageTask(req.user?.role)) {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền cập nhật nhiệm vụ' });
+        }
+
+        const task = await taskService.updateTask(req.params.id, req.body, { id: req.user?.id, role: req.user?.role });
         res.status(200).json({ success: true, data: task });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -76,6 +89,10 @@ const updateTask = async (req, res) => {
 
 const deleteTask = async (req, res) => {
     try {
+        if (!canManageTask(req.user?.role)) {
+            return res.status(403).json({ success: false, message: 'Bạn không có quyền xóa nhiệm vụ' });
+        }
+
         await taskService.deleteTask(req.params.id);
         res.status(200).json({ success: true, message: 'Đã xóa nhiệm vụ' });
     } catch (error) {
@@ -85,6 +102,10 @@ const deleteTask = async (req, res) => {
 
 const submitTask = async (req, res) => {
     try {
+        if (!canSubmitTask(req.user?.role)) {
+            return res.status(403).json({ success: false, message: 'Chỉ sinh viên mới có thể nộp nhiệm vụ' });
+        }
+
         if (req.file) {
             req.body.fileUrl = `/uploads/tasks/${req.file.filename}`;
             req.body.fileName = req.file.originalname;
@@ -97,4 +118,22 @@ const submitTask = async (req, res) => {
     }
 };
 
-module.exports = { getTasks, getMyTasks, getTaskById, createTask, updateTask, deleteTask, submitTask };
+const addComment = async (req, res) => {
+    try {
+        const task = await taskService.addTaskComment(req.params.id, req.user.id, req.user.role, req.body?.content);
+        res.status(200).json({ success: true, data: task });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+const saveMentorNote = async (req, res) => {
+    try {
+        const task = await taskService.saveMentorNote(req.params.id, req.user.id, req.user.role, req.body?.note);
+        res.status(200).json({ success: true, data: task });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
+module.exports = { getTasks, getMyTasks, getTaskById, createTask, updateTask, deleteTask, submitTask, addComment, saveMentorNote };
