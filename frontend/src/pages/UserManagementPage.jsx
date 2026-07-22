@@ -93,7 +93,7 @@ function UserManagementPage() {
         description="Quản lý vai trò và theo dõi tài khoản từ bảng điều khiển admin"
       />
 
-      <section className="user-management-summary-grid">
+      <section className="user-management-summary-grid admin-summary-grid">
         <div className="summary-card">
           <p className="summary-label">Tổng người dùng</p>
           <h3>{summary.total}</h3>
@@ -108,7 +108,7 @@ function UserManagementPage() {
         </div>
       </section>
 
-      <section className="card user-management-card">
+      <section className="card user-management-card admin-panel-card">
         <div className="user-management-toolbar">
           <div className="user-search-box">
             <span className="search-icon">🔎</span>
@@ -128,7 +128,7 @@ function UserManagementPage() {
         </div>
 
         {loading ? (
-          <div className="user-loading-state">Đang tải danh sách người dùng...</div>
+          <div className="user-loading-state"><div className="loading-grid"><div className="skeleton" style={{ height: 66, borderRadius: 14 }} /><div className="skeleton" style={{ height: 66, borderRadius: 14 }} /></div></div>
         ) : (
           <div className="user-list">
             {filteredUsers.map((user) => (

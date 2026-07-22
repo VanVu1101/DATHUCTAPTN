@@ -7,6 +7,7 @@ const Position = require('../models/position');
 const Mentor = require('../models/mentor');
 const Evaluation = require('../models/evaluation');
 const Notification = require('../models/notification');
+const { publishReportReviewed } = require('./sns.service');
 // Evaluation model already required above
 
 const VALID_REPORT_STATUSES = ['DRAFT', 'SUBMITTED', 'REVIEWED', 'REJECTED'];
@@ -16,6 +17,7 @@ const mapStatusForResponse = (status) => {
     if (!status) return status;
     const normalized = String(status).trim().toUpperCase();
     if (normalized === 'REVIEWED') return 'APPROVED';
+    if (normalized === 'SUBMITTED') return 'PENDING';
     return normalized;
 };
 
@@ -41,6 +43,9 @@ const normalizeFilterStatus = (status) => {
     if (!status) return null;
     const normalized = String(status).trim().toUpperCase();
     if (normalized === 'APPROVED') return 'REVIEWED';
+    if (normalized === 'PENDING') return 'SUBMITTED';
+    if (normalized === 'WAITING' || normalized === 'WAIT') return 'SUBMITTED';
+    if (normalized === 'REJECTED') return 'REJECTED';
     if (VALID_REPORT_STATUSES.includes(normalized)) return normalized;
     return null;
 };
@@ -481,6 +486,19 @@ const updateReportStatus = async (id, status, reviewerNote = null, evalPayload =
         } catch (notificationError) {
             console.error('Report notification error:', notificationError.message);
         }
+    }
+
+    try {
+        const student = await Student.findByPk(report.studentId || null).catch(() => null);
+        await publishReportReviewed({
+            studentName: student?.fullName || 'Sinh viên',
+            weekNumber: saved.weekNumber || report.weekNumber,
+            reviewedAt: new Date().toISOString(),
+            status: normalizedStatus === 'REVIEWED' ? 'Approved' : normalizedStatus === 'REJECTED' ? 'Rejected' : normalizedStatus,
+            reviewerNote: reviewerNote || null
+        });
+    } catch (snsError) {
+        console.error('SNS review notification error:', snsError?.message || snsError);
     }
 
     return mapReportResponse(saved);

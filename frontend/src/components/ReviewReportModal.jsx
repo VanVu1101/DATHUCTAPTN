@@ -56,8 +56,8 @@ export default function ReviewReportModal({ open, report, onClose, onSubmit }) {
           <div className="form-field">
             <label>Trạng thái duyệt</label>
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="APPROVED">Duyệt</option>
-              <option value="REJECTED">Từ chối</option>
+              <option value="APPROVED">Đã duyệt</option>
+              <option value="REJECTED">Cần sửa</option>
             </select>
           </div>
 

@@ -132,19 +132,27 @@ function StudentManagementPage() {
       };
 
       let createdOrUpdatedStudent = null;
+      let successMessage = 'Đã tạo sinh viên mới.';
 
       if (editingStudent) {
         const res = await updateStudent(editingStudent.id, payload);
         createdOrUpdatedStudent = res?.data || res;
-        if (form.mentorId) {
-          await assignStudentMentor(editingStudent.id, Number(form.mentorId));
-        }
-        setMessage('Đã cập nhật sinh viên.');
+        successMessage = 'Đã cập nhật sinh viên.';
       } else {
         const res = await createStudent(payload);
         createdOrUpdatedStudent = res?.data || res;
-        setMessage('Đã tạo sinh viên mới.');
       }
+
+      if (form.mentorId) {
+        try {
+          await assignStudentMentor((createdOrUpdatedStudent?.id || editingStudent?.id), Number(form.mentorId));
+        } catch (mentorError) {
+          const mentorMessage = mentorError?.response?.data?.message || mentorError?.message || 'Không thể phân công mentor.';
+          successMessage = `${successMessage} Tuy nhiên, ${mentorMessage.toLowerCase()}`;
+        }
+      }
+
+      setMessage(successMessage);
 
       if (createdOrUpdatedStudent?.id) {
         setStudents((current) => {
@@ -171,7 +179,7 @@ function StudentManagementPage() {
     try {
       await deleteStudent(studentId);
       setMessage('Đã xóa sinh viên.');
-      loadData();
+      await loadData();
     } catch (error) {
       setMessage(error.response?.data?.message || 'Xóa sinh viên thất bại.');
     }
@@ -194,20 +202,21 @@ function StudentManagementPage() {
 
   return (
     <div className="page-shell">
-      <section className="hero-card">
+      <section className="hero-card admin-hero-card student-admin-hero">
         <div className="card-header">
           <div>
+            <div className="eyebrow">Admin • Student Ops</div>
             <h1>Quản lý sinh viên thực tập</h1>
             <p>Danh sách, tìm kiếm, lọc theo kỳ và trạng thái sinh viên.</p>
           </div>
-          <button className="btn primary" type="button" onClick={openCreateForm}>Thêm sinh viên</button>
+          <button className="btn primary" type="button" onClick={openCreateForm}>➕ Thêm sinh viên</button>
         </div>
       </section>
 
       {message && <div className="info-card"><p>{message}</p></div>}
 
-      <section className="card">
-        <div className="report-filters student-filters">
+      <section className="card admin-panel-card">
+        <div className="report-filters student-filters admin-filters">
           <input
             type="text"
             placeholder="Tìm tên, mã, lớp, chuyên ngành hoặc doanh nghiệp"
@@ -228,10 +237,10 @@ function StudentManagementPage() {
         </div>
 
         {loading ? (
-          <p>Đang tải...</p>
+          <div className="loading-grid"><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div>
         ) : (
           <div className="table-wrapper">
-            <table className="simple-table">
+            <table className="simple-table admin-table">
               <thead>
                 <tr>
                   <th>Mã SV</th>

@@ -35,7 +35,7 @@ function QRCheckinPage() {
     <div className="page-shell">
       <div className="card">
         <h2>QR Check-in</h2>
-        {loading ? <p>Đang xử lý...</p> : result?.ok ? (
+        {loading ? <div className="loading-grid"><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div> : result?.ok ? (
           <div>
             <p>Check-in thành công!</p>
             <pre>{JSON.stringify(result.data, null, 2)}</pre>

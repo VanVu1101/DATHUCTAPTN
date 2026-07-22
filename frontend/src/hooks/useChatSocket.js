@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+const socketUrl = (import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000').replace(/\/$/, '');
 
 export default function useChatSocket({ onMessage, onRead, onTyping }) {
   const socketRef = useRef(null);
@@ -20,16 +20,26 @@ export default function useChatSocket({ onMessage, onRead, onTyping }) {
       auth: { token },
       transports: ['websocket', 'polling'],
       reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      timeout: 10000,
+      forceNew: true,
     });
     socketRef.current = socket;
 
     const handleConnect = () => setConnected(true);
     const handleDisconnect = () => setConnected(false);
+    const handleConnectError = (error) => {
+      console.error('Socket connect error:', error?.message || error);
+      setConnected(false);
+    };
     const handleMessage = (message) => handlersRef.current.onMessage?.(message);
     const handleRead = (payload) => handlersRef.current.onRead?.(payload);
     const handleTyping = (payload) => handlersRef.current.onTyping?.(payload);
 
     socket.on('connect', handleConnect);
+    socket.on('connect_error', handleConnectError);
+    socket.on('connect_failed', handleConnectError);
     socket.on('disconnect', handleDisconnect);
     socket.on('message:new', handleMessage);
     socket.on('message:read', handleRead);

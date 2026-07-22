@@ -22,6 +22,7 @@ const PeriodDocument = require('./src/models/periodDocument');
 const StudentDocument = require('./src/models/studentDocument');
 const Evaluation = require('./src/models/evaluation');
 const Notification = require('./src/models/notification');
+const NotificationDeliveryLog = require('./src/models/notificationDeliveryLog');
 const CheckIn = require('./src/models/checkIn');
 const Schedule = require('./src/models/schedule');
 const Meeting = require('./src/models/meeting');
@@ -30,20 +31,30 @@ const ChatMessage = require('./src/models/chatMessage');
 
 const app = express();
 const httpServer = http.createServer(app);
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+const defaultOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://127.0.0.1:3000'];
+const envOrigins = (process.env.FRONTEND_URL || '')
     .split(',')
-    .map((origin) => origin.trim());
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+const allowedOrigins = [...new Set([...defaultOrigins, ...envOrigins])];
+const corsOriginHandler = (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+    }
+    return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+};
 const io = new Server(httpServer, {
     cors: {
-        origin: allowedOrigins,
-        credentials: true
+        origin: corsOriginHandler,
+        credentials: true,
+        methods: ['GET', 'POST']
     }
 });
 app.set('io', io);
 require('./src/sockets/chat.socket')(io);
 
 // Middlewares cơ bản
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.use(cors({ origin: corsOriginHandler, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -156,6 +167,7 @@ const mentorRoutes = require('./src/routes/mentor');
 const uploadRoutes = require('./src/routes/upload');
 const studentGoalRoutes = require('./src/routes/studentGoal');
 const userRoutes = require('./src/routes/user');
+const enterpriseRoutes = require('./src/routes/enterprise');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
@@ -174,6 +186,7 @@ app.use('/api/mentors', mentorRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/goals', studentGoalRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/enterprise', enterpriseRoutes);
 
 // 2. Đồng bộ Database an toàn: tạo bảng mới nếu chưa có, và bổ sung cột thiếu cho bảng tasks
 const ensureTaskTableColumns = async () => {
@@ -328,6 +341,19 @@ const ensureNotificationTableColumns = async () => {
     }
 };
 
+const ensureNotificationDeliveryLogTable = async () => {
+    try {
+        const queryInterface = sequelize.getQueryInterface();
+        const table = await queryInterface.describeTable('notification_delivery_logs').catch(() => null);
+        if (table) return;
+
+        await NotificationDeliveryLog.sync({ force: false });
+        console.log('✅ Đã tạo bảng notification_delivery_logs');
+    } catch (error) {
+        console.error('❌ Lỗi khi tạo bảng notification_delivery_logs:', error);
+    }
+};
+
 const ensureMentorTableColumns = async () => {
     try {
         const queryInterface = sequelize.getQueryInterface();
@@ -411,6 +437,7 @@ sequelize.sync()
         await ensureReportTableColumns();
         await ensureEvaluationTableColumns();
         await ensureNotificationTableColumns();
+        await ensureNotificationDeliveryLogTable();
         await ensureMentorTableColumns();
         await ensureWeeklyReportTableColumns();
         await ensureMeetingTableColumns();

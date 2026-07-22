@@ -131,14 +131,15 @@ function MentorManagementPage() {
 
   return (
     <div className="page-shell">
-      <section className="hero-card">
+      <section className="hero-card admin-hero-card mentor-admin-hero">
         <div className="card-header">
           <div>
+            <div className="eyebrow">Admin • Mentor Hub</div>
             <h1>Quản lý mentor</h1>
             <p>Tạo tài khoản mentor và theo dõi số sinh viên được phân công.</p>
           </div>
           {!isMentorAccount && (
-            <button type="button" className="btn primary" onClick={openCreate}>Thêm mentor</button>
+            <button type="button" className="btn primary" onClick={openCreate}>🧑‍🏫 Thêm mentor</button>
           )}
         </div>
       </section>
@@ -146,14 +147,14 @@ function MentorManagementPage() {
       {message && <div className="info-card"><p>{message}</p></div>}
 
       {!isMentorAccount && (
-        <section className="card">
+        <section className="card admin-panel-card">
           <div className="card-header">
             <div>
               <h3>Phân công sinh viên</h3>
               <p>Chỉ hiển thị sinh viên chưa được phân công và phù hợp với doanh nghiệp.</p>
             </div>
           </div>
-          <form className="report-filters" onSubmit={assign}>
+          <form className="report-filters admin-filters" onSubmit={assign}>
             <input
               type="text"
               placeholder="Tìm sinh viên theo mã, họ tên, doanh nghiệp"
@@ -180,9 +181,9 @@ function MentorManagementPage() {
       )}
 
       <section className="card">
-        {loading ? <p>Đang tải...</p> : (
+        {loading ? <div className="loading-grid"><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div> : (
           <div className="table-wrapper">
-            <table className="simple-table">
+            <table className="simple-table admin-table">
               <thead>
                 <tr>
                   <th>Họ tên</th>

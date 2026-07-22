@@ -4,10 +4,13 @@ const Student = require('../models/student');
 const ReportModel = require('../models/report');
 const WeeklyReport = require('../models/weeklyReport');
 const User = require('../models/user');
+const { scanBuffer } = require('../infrastructure/virusScan');
+const { createAudit } = require('../services/auditService');
 const notificationService = require('../services/notification');
-const { uploadFile } = require('../config/s3');
+const { uploadFile, getFileUrl } = require('../config/s3');
 const { notifyTaskAssigned, notifyDeadlineSoon } = require('../services/automation');
 const { sendReportSubmissionEmail } = require('../infrastructure/mail');
+const { publishWeeklyReportSubmitted } = require('../services/sns.service');
 
 const mentorOwnsStudent = async (userId, studentId) => {
     const mentor = await Mentor.findOne({ where: { userId } });
@@ -35,6 +38,19 @@ const submitReport = async (req, res) => {
         }
 
         if (req.file) {
+            // optional virus scan
+            try {
+                const scanResult = await scanBuffer(req.file.buffer);
+                if (scanResult && scanResult.ok === false && scanResult.infected) {
+                    return res.status(400).json({ success: false, message: 'Tệp bị nghi ngờ chứa mã độc. Tải lên bị từ chối.' });
+                }
+            } catch (scanErr) {
+                console.error('Virus scan error:', scanErr?.message || scanErr);
+                // If scanning is enabled and fails, reject to be safe
+                if (String(process.env.ENABLE_VIRUS_SCAN || '') === 'true') {
+                    return res.status(500).json({ success: false, message: 'Lỗi quét tệp. Vui lòng thử lại sau.' });
+                }
+            }
             // Double-check file mime and size server-side (extra safety)
             const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
             const maxBytes = 5 * 1024 * 1024;
@@ -56,6 +72,12 @@ const submitReport = async (req, res) => {
             payload.fileUrl = url;
             payload.fileName = req.file.originalname;
             payload.fileType = req.file.mimetype;
+            // record audit: upload
+            try {
+                await createAudit({ userId: req.user.id, action: 'upload', resourceType: 'report', resourceId: null, meta: { fileName: req.file.originalname } });
+            } catch (e) {
+                /* ignore */
+            }
         }
         const report = await reportService.createReportForUser(payload);
                 // notify mentor if assigned
@@ -81,11 +103,20 @@ const submitReport = async (req, res) => {
                                     reportLink: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reports`
                                 });
                             }
+
+                            await publishWeeklyReportSubmitted({
+                                studentName: student.fullName || 'Sinh viên',
+                                weekNumber: report.weekNumber,
+                                submittedAt: report.createdAt || new Date().toISOString(),
+                                status: 'Submitted'
+                            });
                         }
                     }
                 } catch (nErr) {
                     console.error('Notification error:', nErr.message || nErr);
                 }
+        // audit: report create/submission
+        try { await createAudit({ userId: req.user.id, action: 'submit', resourceType: 'report', resourceId: report?.id || null }); } catch (e) {}
         res.status(201).json({ success: true, message: 'Báo cáo đã được nộp thành công. Mentor sẽ nhận thông báo.', data: report });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -246,6 +277,7 @@ const updateReport = async (req, res) => {
         }
 
         const report = await reportService.updateReport(req.params.id, req.body);
+        try { await createAudit({ userId: req.user.id, action: 'update', resourceType: 'report', resourceId: report.id }); } catch (e) {}
         res.status(200).json({ success: true, data: report });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -263,6 +295,7 @@ const deleteReport = async (req, res) => {
         }
 
         await reportService.deleteReport(req.params.id);
+        try { await createAudit({ userId: req.user.id, action: 'delete', resourceType: 'report', resourceId: Number(req.params.id) }); } catch (e) {}
         res.status(200).json({ success: true, message: 'Đã xóa báo cáo' });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
@@ -273,6 +306,7 @@ const deleteReport = async (req, res) => {
 const getMyReports = async (req, res) => {
     try {
         const reports = await reportService.getReportsForUser(req.user.id);
+        try { await createAudit({ userId: req.user.id, action: 'view_list', resourceType: 'report_list', resourceId: null }); } catch (e) {}
         res.status(200).json({ success: true, data: reports });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -297,9 +331,56 @@ const getAllReports = async (req, res) => {
             status: req.query.status
         };
         const reports = await reportService.getReports(filters);
+        try { await createAudit({ userId: req.user.id, action: 'view_list_admin', resourceType: 'report_list_admin', resourceId: null }); } catch (e) {}
         res.status(200).json({ success: true, data: reports });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const downloadReport = async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const report = await ReportModel.findByPk(id);
+        if (!report) return res.status(404).json({ success: false, message: 'Không tìm thấy báo cáo.' });
+
+        // permission: owner or mentor of student or admin
+        const isOwner = Number(report.userId) === Number(req.user.id) || Number(report.studentId) === Number(req.user.id);
+        const okMentor = await mentorOwnsStudent(req.user.id, report.studentId).catch(() => false);
+        const isAdmin = req.user?.role === 'ADMIN';
+        if (!isOwner && !okMentor && !isAdmin) return res.status(403).json({ success: false, message: 'Không có quyền tải xuống báo cáo này.' });
+
+        const fileUrl = report.fileUrl;
+        if (!fileUrl) return res.status(404).json({ success: false, message: 'Báo cáo không có tệp đính kèm.' });
+
+        // audit: download
+        try { await createAudit({ userId: req.user.id, action: 'download', resourceType: 'report', resourceId: report.id }); } catch (e) {}
+
+        // If URL already looks like a presigned URL or external link, redirect
+        if (/X-Amz-Algorithm|X-Amz-Signature|X-Amz-Credential/.test(fileUrl) || /^https?:\/\//i.test(fileUrl) && !fileUrl.includes('.s3.')) {
+            return res.redirect(fileUrl);
+        }
+
+        // If it is an S3 public URL, try to extract key and generate signed URL
+        const s3Match = fileUrl.match(/https?:\/\/[^/]+\.s3(?:[.-][^/]+)?\.amazonaws\.com\/(.+)$/i);
+        if (s3Match && s3Match[1]) {
+            const key = decodeURIComponent(s3Match[1]);
+            const signed = await getFileUrl(key);
+            return res.redirect(signed);
+        }
+
+        // If local uploads path
+        if (fileUrl.startsWith('/') || fileUrl.includes('/uploads/')) {
+            const backendHost = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+            const url = fileUrl.startsWith('http') ? fileUrl : `${backendHost}${fileUrl.startsWith('/') ? '' : '/'}${fileUrl}`;
+            return res.redirect(url);
+        }
+
+        // Fallback: redirect to the stored URL
+        return res.redirect(fileUrl);
+    } catch (error) {
+        console.error('downloadReport error:', error?.message || error);
+        return res.status(500).json({ success: false, message: 'Lỗi khi xử lý yêu cầu tải xuống.' });
     }
 };
 
@@ -326,5 +407,6 @@ module.exports = {
     updateReportStatus,
     createReport,
     updateReport,
-    deleteReport
+    deleteReport,
+    downloadReport
 };

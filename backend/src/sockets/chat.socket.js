@@ -20,13 +20,29 @@ const publicError = (error) => ({
     message: error.status === 500 ? 'Không thể xử lý yêu cầu chat.' : error.message
 });
 
+const getToken = (socket) => {
+    const rawToken = socket.handshake.auth?.token || socket.handshake.headers.authorization;
+    if (typeof rawToken !== 'string') return null;
+    const trimmed = rawToken.trim();
+    if (!trimmed) return null;
+    return trimmed.startsWith('Bearer ') ? trimmed.slice(7).trim() : trimmed;
+};
+
+const getJwtSecret = () => {
+    if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+    if (process.env.NODE_ENV === 'production') return undefined;
+    return 'dev-secret';
+};
+
 module.exports = (io) => {
     io.use((socket, next) => {
         try {
-            const token = socket.handshake.auth?.token
-                || socket.handshake.headers.authorization?.split(' ')[1];
-            if (!token) return next(new Error('CHAT_UNAUTHORIZED'));
-            const user = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret');
+            const token = getToken(socket);
+            const jwtSecret = getJwtSecret();
+            if (!token || !jwtSecret) {
+                return next(new Error('CHAT_UNAUTHORIZED'));
+            }
+            const user = jwt.verify(token, jwtSecret);
             if (!['STUDENT', 'ENTERPRISE'].includes(user.role)) {
                 return next(new Error('CHAT_FORBIDDEN'));
             }

@@ -218,7 +218,7 @@ function InternshipPeriodsPage() {
         </div>
 
         {loading ? (
-          <p>Đang tải...</p>
+          <div className="loading-grid"><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div>
         ) : periods.length === 0 ? (
           <p>Chưa có kỳ thực tập nào.</p>
         ) : (

@@ -7,6 +7,14 @@ function MainLayout() {
   const [user, setUser] = useState(null);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
 
+  const todayLabel = new Date().toLocaleDateString('vi-VN', {
+    weekday: 'long',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const roleLabel = user?.role === 'ADMIN' ? 'Quản trị viên' : user?.role === 'MENTOR' ? 'Mentor' : user?.role === 'ENTERPRISE' ? 'Doanh nghiệp' : 'Người dùng';
+
   useEffect(() => {
     const stored = localStorage.getItem('user');
     if (stored) {
@@ -16,6 +24,7 @@ function MainLayout() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
+    document.body.setAttribute('data-theme', darkMode ? 'dark' : 'light');
     localStorage.setItem('theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
@@ -24,11 +33,16 @@ function MainLayout() {
       <Sidebar />
       <div className="main-area">
         <header className="topbar">
-          <div>
-            <div className="brand">Internship OS</div>
-            <div className="topbar-subtitle">Hệ thống quản lý thực tập hiện đại</div>
+          <div className="topbar-brand-group">
+            <div className="brand-mark">IO</div>
+            <div>
+              <div className="brand">Internship OS</div>
+              <div className="topbar-subtitle">Hệ thống quản lý thực tập hiện đại</div>
+            </div>
           </div>
           <div className="topbar-actions">
+            <div className="topbar-pill topbar-date-pill">{todayLabel}</div>
+            {user ? <div className="topbar-pill topbar-user-pill">{user.fullName || user.name || 'Người dùng'} · {roleLabel}</div> : null}
             <button className="theme-toggle" onClick={() => setDarkMode((value) => !value)}>{darkMode ? '☀️' : '🌙'}</button>
           </div>
         </header>

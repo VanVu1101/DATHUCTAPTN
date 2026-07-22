@@ -4,6 +4,23 @@ import { getNotifications, markAsRead } from '../services/notificationService';
 import PageHeader from '../components/PageHeader';
 import { notifySuccess } from '../utils/toast';
 
+const getNotificationMeta = (notification) => {
+  const type = notification?.type || '';
+  if (type.includes('REPORT') || type.includes('REPORT')) {
+    return { icon: '📝', label: 'Báo cáo' };
+  }
+  if (type.includes('TASK')) {
+    return { icon: '✅', label: 'Nhiệm vụ' };
+  }
+  if (type.includes('CHAT')) {
+    return { icon: '💬', label: 'Trò chuyện' };
+  }
+  if (type.includes('MEETING')) {
+    return { icon: '📅', label: 'Lịch họp' };
+  }
+  return { icon: '🔔', label: 'Thông báo' };
+};
+
 function NotificationsPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,49 +65,77 @@ function NotificationsPage() {
     return undefined;
   };
 
+  const unreadCount = items.filter((item) => !item.read).length;
+
   return (
-    <div className="page-shell">
+    <div className="page-shell notification-page">
       <PageHeader title="Thông báo" description="Theo dõi các thông báo quan trọng về báo cáo, nhiệm vụ và cập nhật hệ thống." />
-      <section className="card">
-        <h2>Thông báo</h2>
+      <section className="card notification-shell">
+        <div className="notification-header">
+          <div>
+            <h2>Thông báo gần đây</h2>
+            <p className="notification-subtitle">
+              {unreadCount > 0 ? `${unreadCount} thông báo chưa đọc cần xem ngay.` : 'Tất cả thông báo đã được xử lý.'}
+            </p>
+          </div>
+          <div className="notification-summary">
+            <span className="notification-pill">{items.length} mục</span>
+            <span className={`notification-pill ${unreadCount > 0 ? 'pill-accent' : ''}`}>
+              {unreadCount > 0 ? `${unreadCount} chưa đọc` : 'Đã xem hết'}
+            </span>
+          </div>
+        </div>
+
         {loading ? (
           <div className="loading-grid">
-            <div className="skeleton" style={{ height: 72, borderRadius: 14 }} />
-            <div className="skeleton" style={{ height: 72, borderRadius: 14 }} />
+            <div className="skeleton" style={{ height: 90, borderRadius: 18 }} />
+            <div className="skeleton" style={{ height: 90, borderRadius: 18 }} />
           </div>
         ) : items.length === 0 ? (
           <div className="empty-state-card">Không có thông báo nào tại thời điểm này.</div>
         ) : (
           <ul className="notification-list">
-            {items.map((n) => (
-              <li
-                key={n.id}
-                className={n.read ? 'read' : 'unread'}
-                role="button"
-                tabIndex="0"
-                onClick={() => openNotification(n)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') openNotification(n);
-                }}
-              >
-                <div className="notification-head">
-                  <strong>{n.title}</strong>
-                  {!n.read && (
-                    <button
-                      className="btn small"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleMark(n.id);
-                      }}
-                    >
-                      Đã đọc
-                    </button>
-                  )}
-                </div>
-                <div className="notification-body">{n.message}</div>
-                <small className="muted">{new Date(n.createdAt).toLocaleString()}</small>
-              </li>
-            ))}
+            {items.map((n) => {
+              const meta = getNotificationMeta(n);
+              return (
+                <li
+                  key={n.id}
+                  className={`notification-card ${n.read ? 'read' : 'unread'}`}
+                  role="button"
+                  tabIndex="0"
+                  onClick={() => openNotification(n)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') openNotification(n);
+                  }}
+                >
+                  <div className="notification-icon" aria-hidden="true">{meta.icon}</div>
+                  <div className="notification-body-block">
+                    <div className="notification-head">
+                      <div className="notification-title-row">
+                        <strong>{n.title}</strong>
+                        <span className="notification-chip">{meta.label}</span>
+                      </div>
+                      {!n.read && (
+                        <button
+                          className="btn outline small"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleMark(n.id);
+                          }}
+                        >
+                          Đã đọc
+                        </button>
+                      )}
+                    </div>
+                    <p className="notification-message">{n.message}</p>
+                    <div className="notification-meta-row">
+                      <span className="notification-time">{new Date(n.createdAt).toLocaleString('vi-VN')}</span>
+                      {!n.read && <span className="notification-dot">Mới</span>}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

@@ -325,7 +325,7 @@ function InternshipInfo() {
     return (
       <div className="page-shell internship-info-page">
         <h1>Thông tin thực tập</h1>
-        <div className="card">Đang tải dữ liệu...</div>
+        <div className="card"><div className="loading-grid"><div className="skeleton" style={{ height: 90, borderRadius: 18 }} /><div className="skeleton" style={{ height: 70, borderRadius: 16 }} /></div></div>
       </div>
     );
   }
@@ -339,8 +339,8 @@ function InternshipInfo() {
           <p className="hero-subtitle">Giữ tổng quan công việc, roadmap tuần và các mục tiêu đã duyệt ở cùng một nơi.</p>
         </div>
         <div className="hero-badges">
-          <span className="hero-badge">📈 Tiến độ rõ ràng</span>
-          <span className="hero-badge">🎯 Mục tiêu theo tuần</span>
+          <span className="hero-badge"><span className="hero-badge-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19h16" /><path d="M7 15v-4" /><path d="M12 15V7" /><path d="M17 15v-2" /></svg></span>Tiến độ rõ ràng</span>
+          <span className="hero-badge"><span className="hero-badge-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="4" /></svg></span>Mục tiêu theo tuần</span>
         </div>
       </section>
 
@@ -349,7 +349,7 @@ function InternshipInfo() {
 
       <div className="overview-grid">
         <section className="card section-card">
-          <h2>📋 Chi tiết kỳ thực tập</h2>
+          <h2><span className="section-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v18H7.5A2.5 2.5 0 0 0 5 18.5Z" /><path d="M8 7h8" /><path d="M8 11h8" /></svg></span>Chi tiết kỳ thực tập</h2>
           <div className="info-grid">
             <div>
               <strong>Doanh nghiệp</strong>
@@ -377,7 +377,7 @@ function InternshipInfo() {
         </section>
 
         <section className="card progress-card section-card">
-          <h2>📈 Tiến độ thực tập</h2>
+          <h2><span className="section-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19h16" /><path d="M7 15v-4" /><path d="M12 15V7" /><path d="M17 15v-2" /></svg></span>Tiến độ thực tập</h2>
           <div className="progress-summary">
             <div>
               <strong>Hoàn thành</strong>
@@ -430,7 +430,7 @@ function InternshipInfo() {
 
       <div className="split-grid">
         <section className="card section-card">
-          <h2>🎯 Mục tiêu kỳ này</h2>
+          <h2><span className="section-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="4" /></svg></span>Mục tiêu kỳ này</h2>
           <div className="goal-summary-grid">
             <div>
               <strong>Tổng mục tiêu</strong>
@@ -460,7 +460,7 @@ function InternshipInfo() {
         </section>
 
         <section className="card section-card">
-          <h2>🗂️ Nhiệm vụ sắp tới</h2>
+          <h2><span className="section-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 4h10" /><path d="M9 12h10" /><path d="M9 20h10" /><path d="M5 4h.01" /><path d="M5 12h.01" /><path d="M5 20h.01" /></svg></span>Nhiệm vụ sắp tới</h2>
           <div className="timeline-list">{renderUpcomingTasks()}</div>
         </section>
       </div>
@@ -497,14 +497,14 @@ function InternshipInfo() {
 
       <section className="card">
         <div className="card-header">
-          <h2>📝 Danh sách mục tiêu</h2>
+          <h2><span className="section-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3h8l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M15 3v5h5" /></svg></span>Danh sách mục tiêu</h2>
           <span className="badge">{user?.role === 'ENTERPRISE' ? 'Mentor duyệt mục tiêu' : 'Sinh viên quản lý mục tiêu'}</span>
         </div>
         <div className="goal-list">{renderGoals()}</div>
       </section>
 
       <section className="card timeline-card">
-        <h2>🧭 Lộ trình tuần</h2>
+        <h2><span className="section-title-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16" /><path d="M7 10h10" /><path d="M7 14h6" /></svg></span>Lộ trình tuần</h2>
         <div className="timeline-list">{renderTimeline()}</div>
       </section>
     </div>

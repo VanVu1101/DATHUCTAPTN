@@ -56,14 +56,19 @@ const createSchedule = async (data) => {
 
 const getSchedules = async (filters = {}) => {
     const where = {};
+    const normalizedPeriodId = filters.periodId === undefined || filters.periodId === null || filters.periodId === ''
+        ? null
+        : Number(filters.periodId);
 
     console.log('🔍 getSchedules called with filters:', filters);
 
-    // Nếu có periodId, filter theo period hoặc show ALL_STUDENTS
-    if (filters.periodId) {
+    // Nếu có periodId hợp lệ, lấy lịch chung + lịch dành cho kỳ được chọn.
+    // Đồng thời giữ các bản ghi cũ chưa có periodId để tránh màn hình bị trống.
+    if (normalizedPeriodId) {
         where[Op.or] = [
             { audience: 'ALL_STUDENTS' },
-            { audience: 'SPECIFIC_PERIOD', periodId: filters.periodId }
+            { audience: 'SPECIFIC_PERIOD', periodId: normalizedPeriodId },
+            { audience: 'SPECIFIC_PERIOD', periodId: null }
         ];
     } else {
         // Không có periodId, chỉ show ALL_STUDENTS

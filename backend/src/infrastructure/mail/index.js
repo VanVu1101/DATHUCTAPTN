@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const { SNSClient, PublishCommand } = require('@aws-sdk/client-sns');
 const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+const NotificationDeliveryLog = require('../../models/notificationDeliveryLog');
 
 const snsClient = (() => {
     const region = process.env.AWS_REGION || 'ap-southeast-1';
@@ -61,6 +62,40 @@ const createTransporter = () => {
     });
 };
 
+const logNotificationDelivery = async ({ event, provider, status, toEmail, subject, reason, details = {}, source }) => {
+    const payload = {
+        timestamp: new Date().toISOString(),
+        event,
+        provider,
+        status,
+        toEmail,
+        subject,
+        reason,
+        ...details
+    };
+
+    if (status === 'success') {
+        console.info('[notification]', JSON.stringify(payload));
+    } else {
+        console.error('[notification]', JSON.stringify(payload));
+    }
+
+    try {
+        await NotificationDeliveryLog.create({
+            event,
+            provider,
+            status,
+            toEmail,
+            subject,
+            reason,
+            source,
+            metadata: details
+        });
+    } catch (logError) {
+        console.warn('[notification-log-failed]', logError.message);
+    }
+};
+
 const buildPasswordResetMessage = (toEmail, resetLink) => ({
     subject: 'Đặt lại mật khẩu InternHub',
     html: `
@@ -118,9 +153,25 @@ const sendViaSes = async (toEmail, subject, html, text) => {
         });
 
         await sesClient.send(command);
+        await logNotificationDelivery({
+            event: 'email.send',
+            provider: 'ses',
+            status: 'success',
+            toEmail,
+            subject,
+            reason: 'SES_SUCCESS'
+        });
         return { sent: true, provider: 'ses' };
     } catch (error) {
-        console.error('SES send failed:', error.message);
+        await logNotificationDelivery({
+            event: 'email.send',
+            provider: 'ses',
+            status: 'failed',
+            toEmail,
+            subject,
+            reason: 'SES_FAILED',
+            details: { error: error.message }
+        });
         return { sent: false, reason: 'SES_FAILED', error: error.message };
     }
 };
@@ -142,9 +193,25 @@ const sendViaSns = async (toEmail, subject, html, text) => {
         });
 
         await snsClient.send(command);
+        await logNotificationDelivery({
+            event: 'email.send',
+            provider: 'sns',
+            status: 'success',
+            toEmail,
+            subject,
+            reason: 'SNS_SUCCESS'
+        });
         return { sent: true, provider: 'sns' };
     } catch (error) {
-        console.error('SNS publish failed:', error.message);
+        await logNotificationDelivery({
+            event: 'email.send',
+            provider: 'sns',
+            status: 'failed',
+            toEmail,
+            subject,
+            reason: 'SNS_FAILED',
+            details: { error: error.message }
+        });
         return { sent: false, reason: 'SNS_FAILED', error: error.message };
     }
 };
@@ -173,8 +240,25 @@ const sendGenericEmail = async ({ toEmail, subject, html, text }) => {
             html,
             text
         });
+        await logNotificationDelivery({
+            event: 'email.send',
+            provider: 'smtp',
+            status: 'success',
+            toEmail,
+            subject,
+            reason: 'SMTP_SUCCESS'
+        });
         return { sent: true, provider: 'smtp' };
     } catch (error) {
+        await logNotificationDelivery({
+            event: 'email.send',
+            provider: 'smtp',
+            status: 'failed',
+            toEmail,
+            subject,
+            reason: 'SMTP_FAILED',
+            details: { error: error.message, snsResult, sesResult }
+        });
         return { sent: false, reason: 'SMTP_FAILED', error: error.message, snsResult, sesResult };
     }
 };

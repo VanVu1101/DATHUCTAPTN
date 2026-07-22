@@ -27,7 +27,7 @@ export default function LoginHistoryPage() {
       <div className="card">
         <h3>Lịch sử đăng nhập</h3>
         {loading ? (
-          <p>Đang tải...</p>
+          <div className="loading-grid"><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div>
         ) : message ? (
           <p>{message}</p>
         ) : history.length === 0 ? (

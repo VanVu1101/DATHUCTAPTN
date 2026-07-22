@@ -785,10 +785,35 @@ const assignMentor = async (studentId, mentorId, actor) => {
 };
 
 const deleteStudent = async (id) => {
-    const student = await Student.findByPk(id);
-    if (!student) throw new Error('Không tìm thấy sinh viên');
-    await student.destroy();
-    return true;
+    return sequelize.transaction(async (transaction) => {
+        const student = await Student.findByPk(id, { transaction });
+        if (!student) throw new Error('Không tìm thấy sinh viên');
+
+        const studentId = Number(student.id);
+        const studentUserId = Number(student.userId);
+
+        await Promise.allSettled([
+            Internship.update(
+                { status: 'FAILED' },
+                { where: { studentId }, transaction }
+            ),
+            ChatConversation.update(
+                { status: 'ARCHIVED' },
+                { where: { studentUserId }, transaction }
+            ),
+            StudentDocument.destroy({ where: { studentId }, transaction })
+        ]);
+
+        await student.update({
+            status: 'INACTIVE',
+            mentorId: null,
+            mentorName: null,
+            enterpriseName: null,
+            periodId: null
+        }, { transaction });
+
+        return true;
+    });
 };
 
 module.exports = {

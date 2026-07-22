@@ -7,6 +7,7 @@ const User = require('../models/user');
 const Mentor = require('../models/mentor');
 const Notification = require('../models/notification');
 const { notifyTaskAssigned, notifyDeadlineSoon, notifyDeadlineRemindersForStudent } = require('./automation');
+const { publishTaskCreated } = require('./sns.service');
 
 const VALID_TASK_STATUSES = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE'];
 const VALID_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH'];
@@ -187,6 +188,18 @@ const createTask = async (data, actor = {}) => {
     await notifyTaskAssigned(createdTask);
     await notifyDeadlineSoon(createdTask);
     await appendTaskActivity(createdTask, 'TASK_CREATED', { title: payload.title, studentId: student.id }, actor);
+
+    try {
+        await publishTaskCreated({
+            title: createdTask.title,
+            studentName: student.fullName || 'Sinh viên',
+            deadline: createdTask.deadline || null,
+            description: createdTask.description || '',
+            category: createdTask.category || 'General'
+        });
+    } catch (snsError) {
+        console.error('SNS task creation notification error:', snsError?.message || snsError);
+    }
 
     return createdTask;
 };

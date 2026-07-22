@@ -23,8 +23,13 @@ function ToastViewport() {
     <div className="toast-viewport" aria-live="polite">
       {items.map((item) => (
         <div key={item.id} className={`toast toast-${item.type}`}>
-          <strong>{item.type === 'success' ? 'Thành công' : item.type === 'error' ? 'Lỗi' : 'Thông báo'}</strong>
-          <span>{item.message}</span>
+          <div className="toast-icon" aria-hidden="true">
+            {item.type === 'success' ? '✓' : item.type === 'error' ? '!' : 'i'}
+          </div>
+          <div className="toast-copy">
+            <strong>{item.type === 'success' ? 'Thành công' : item.type === 'error' ? 'Lỗi' : 'Thông báo'}</strong>
+            <span>{item.message}</span>
+          </div>
         </div>
       ))}
     </div>

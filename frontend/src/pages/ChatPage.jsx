@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getConversations,
   getMessages,
@@ -38,6 +38,35 @@ const formatConversationTime = (value) => {
   return new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit' }).format(date);
 };
 
+const EMOJI_GROUPS = [
+  {
+    label: 'Cảm xúc',
+    items: ['😊', '😂', '😍', '😎', '🥰', '😢', '👍', '🔥'],
+  },
+  {
+    label: 'Chúc mừng',
+    items: ['🎉', '🎊', '✨', '🥳', '👏', '🙏'],
+  },
+];
+
+const STICKERS = [
+  {
+    id: 'party',
+    name: 'Sticker chúc mừng',
+    image: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160"><rect width="160" height="160" rx="36" fill="#fef3c7"/><circle cx="58" cy="64" r="18" fill="#f59e0b"/><circle cx="102" cy="64" r="18" fill="#f59e0b"/><path d="M56 104c10 14 38 14 48 0" stroke="#ef4444" stroke-width="10" stroke-linecap="round" fill="none"/><path d="M44 44l12 16" stroke="#fb923c" stroke-width="8" stroke-linecap="round"/><path d="M116 44l-12 16" stroke="#fb923c" stroke-width="8" stroke-linecap="round"/></svg>'),
+  },
+  {
+    id: 'love',
+    name: 'Sticker yêu thương',
+    image: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160"><rect width="160" height="160" rx="36" fill="#ffe4e6"/><path d="M80 122c24-18 44-34 44-58a24 24 0 0 0-41-15 24 24 0 0 0-41 15c0 24 20 40 38 58z" fill="#ef4444"/></svg>'),
+  },
+  {
+    id: 'rocket',
+    name: 'Sticker rocket',
+    image: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160"><rect width="160" height="160" rx="36" fill="#dbeafe"/><path d="M104 48c-16 8-28 24-32 44 12 4 28 14 39 30 20-12 30-28 32-44-12-5-24-12-39-30z" fill="#2563eb"/><path d="M83 92c8 2 17 10 24 23" stroke="#1d4ed8" stroke-width="8" stroke-linecap="round"/><path d="M72 119l-16 20" stroke="#1d4ed8" stroke-width="8" stroke-linecap="round"/></svg>'),
+  },
+];
+
 function ChatPage() {
   const user = useMemo(parseUser, []);
   const userId = Number(user.userId || user.id);
@@ -53,10 +82,15 @@ function ChatPage() {
   const [error, setError] = useState('');
   const [typing, setTyping] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [pickerTab, setPickerTab] = useState('emoji');
   const bottomRef = useRef(null);
   const fileRef = useRef(null);
+  const pickerRef = useRef(null);
   const typingTimerRef = useRef(null);
   const activeIdRef = useRef(null);
+  const shouldAutoScrollRef = useRef(true);
+  const isNearBottomRef = useRef(true);
 
   const activeConversation = conversations.find(
     (conversation) => Number(conversation.id) === Number(activeId),
@@ -164,10 +198,30 @@ function ChatPage() {
   }, [activeId, socket]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = bottomRef.current?.parentElement;
+    if (!container) return;
+
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 72;
+    if (!shouldAutoScrollRef.current && !isNearBottom) return;
+
+    requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    });
   }, [messages, typing]);
 
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handlePointerDown = (event) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target)) {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [showEmojiPicker]);
+
   const appendSentMessage = (message) => {
+    shouldAutoScrollRef.current = true;
     setMessages((current) => mergeMessage(current, message));
     setConversations((current) => current.map((conversation) => (
       Number(conversation.id) === Number(message.conversationId)
@@ -184,6 +238,7 @@ function ChatPage() {
 
   const sendPayload = async (payload) => {
     if (!activeId) return;
+    shouldAutoScrollRef.current = true;
     setSending(true);
     setError('');
     try {
@@ -218,6 +273,24 @@ function ChatPage() {
     if (!content || sending || activeConversation?.status !== 'ACTIVE') return;
     socket.current?.emit('typing:stop', { conversationId: activeId });
     sendPayload({ content, type: 'TEXT' });
+  };
+
+  const insertEmoji = (emoji) => {
+    setDraft((current) => `${current}${emoji}`);
+    setShowEmojiPicker(false);
+  };
+
+  const sendSticker = async (sticker) => {
+    if (!activeId || activeConversation?.status !== 'ACTIVE') return;
+    setShowEmojiPicker(false);
+    await sendPayload({
+      content: '',
+      type: 'IMAGE',
+      attachmentUrl: sticker.image,
+      attachmentName: sticker.name,
+      attachmentMime: 'image/svg+xml',
+      attachmentSize: 1200,
+    });
   };
 
   const handleDraftChange = (event) => {
@@ -348,7 +421,15 @@ function ChatPage() {
                 </div>
               </header>
 
-              <div className="message-list">
+              <div
+                className="message-list"
+                onScroll={(event) => {
+                  const container = event.currentTarget;
+                  const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 72;
+                  isNearBottomRef.current = nearBottom;
+                  shouldAutoScrollRef.current = nearBottom;
+                }}
+              >
                 {loadingMessages ? (
                   <div className="chat-panel-state">Đang tải tin nhắn...</div>
                 ) : messages.length === 0 ? (
@@ -405,19 +486,66 @@ function ChatPage() {
                   >
                     {uploading ? '…' : '📎'}
                   </button>
-                  <textarea
-                    rows="1"
-                    maxLength="2000"
-                    value={draft}
-                    onChange={handleDraftChange}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        handleSubmit(event);
-                      }
-                    }}
-                    placeholder="Nhập tin nhắn..."
-                  />
+                  <div className="chat-composer-main" ref={pickerRef}>
+                    <textarea
+                      rows="1"
+                      maxLength="2000"
+                      value={draft}
+                      onChange={handleDraftChange}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          handleSubmit(event);
+                        }
+                      }}
+                      placeholder="Nhập tin nhắn..."
+                    />
+                    {showEmojiPicker && (
+                      <div className="emoji-picker" role="dialog" aria-label="Picker emoji và sticker">
+                        <div className="emoji-picker-tabs">
+                          <button type="button" className={pickerTab === 'emoji' ? 'active' : ''} onClick={() => setPickerTab('emoji')}>
+                            Emoji
+                          </button>
+                          <button type="button" className={pickerTab === 'sticker' ? 'active' : ''} onClick={() => setPickerTab('sticker')}>
+                            Sticker
+                          </button>
+                        </div>
+                        {pickerTab === 'emoji' ? (
+                          <div className="emoji-picker-panel">
+                            {EMOJI_GROUPS.map((group) => (
+                              <div key={group.label} className="emoji-group">
+                                <span>{group.label}</span>
+                                <div className="emoji-grid">
+                                  {group.items.map((emoji) => (
+                                    <button key={emoji} type="button" className="emoji-option" onClick={() => insertEmoji(emoji)}>
+                                      {emoji}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="emoji-picker-panel sticker-panel">
+                            {STICKERS.map((sticker) => (
+                              <button key={sticker.id} type="button" className="sticker-option" onClick={() => sendSticker(sticker)}>
+                                <img src={sticker.image} alt={sticker.name} />
+                                <span>{sticker.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="emoji-button"
+                    onClick={() => setShowEmojiPicker((current) => !current)}
+                    title="Chèn emoji"
+                  >
+                    😊
+                  </button>
                   <button className="send-button" type="submit" disabled={!draft.trim() || sending}>
                     ➤
                   </button>

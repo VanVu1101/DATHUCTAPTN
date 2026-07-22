@@ -73,9 +73,10 @@ function MajorManagementPage() {
 
   return (
     <div className="page-shell">
-      <section className="hero-card">
+      <section className="hero-card admin-hero-card major-admin-hero">
         <div className="card-header">
           <div>
+            <div className="eyebrow">Admin • Curriculum</div>
             <h1>Quản lý chuyên ngành</h1>
             <p>Thêm, sửa và xóa các ngành/chuyên ngành cho sinh viên.</p>
           </div>
@@ -84,7 +85,7 @@ function MajorManagementPage() {
 
       {message && <div className="info-card"><p>{message}</p></div>}
 
-      <section className="card">
+      <section className="card admin-panel-card">
         <form className="form-stack" onSubmit={handleSubmit}>
           <div className="form-grid">
             <label className="profile-field">
@@ -104,9 +105,9 @@ function MajorManagementPage() {
       </section>
 
       <section className="card">
-        {loading ? <p>Đang tải...</p> : (
+        {loading ? <div className="loading-grid"><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div> : (
           <div className="table-wrapper">
-            <table className="simple-table">
+            <table className="simple-table admin-table">
               <thead>
                 <tr>
                   <th>Tên chuyên ngành</th>

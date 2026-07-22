@@ -6,6 +6,7 @@ import { getStudents } from '../services/studentService';
 import StudentAutocomplete from '../components/StudentAutocomplete';
 import { getAllPeriods } from '../services/periodService';
 import PageHeader from '../components/PageHeader';
+import { SkeletonForm } from '../components/SkeletonLoader';
 import { notifyError, notifySuccess } from '../utils/toast';
 
 const BACKEND_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
@@ -65,6 +66,7 @@ function TasksPage() {
   const [message, setMessage] = useState('');
   const [editTask, setEditTask] = useState(null);
   const [form, setForm] = useState(initialForm);
+  const [errors, setErrors] = useState({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [filterPeriod, setFilterPeriod] = useState('');
   const [filterStudent, setFilterStudent] = useState('');
@@ -80,6 +82,7 @@ function TasksPage() {
   const [mentorNoteDraft, setMentorNoteDraft] = useState('');
   const [savingComment, setSavingComment] = useState(false);
   const [savingMentorNote, setSavingMentorNote] = useState(false);
+  const [submittingForm, setSubmittingForm] = useState(false);
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -135,9 +138,41 @@ function TasksPage() {
     loadInitialData();
   }, [filterPeriod, filterStatus]);
 
+  const validateTaskForm = (nextForm = form) => {
+    const nextErrors = {};
+
+    if (!nextForm.title.trim()) {
+      nextErrors.title = 'Tên nhiệm vụ là bắt buộc.';
+    } else if (nextForm.title.trim().length > 100) {
+      nextErrors.title = `Tên tối đa 100 ký tự (hiện có ${nextForm.title.length}).`;
+    }
+
+    if (nextForm.description.trim().length > 500) {
+      nextErrors.description = `Mô tả tối đa 500 ký tự (hiện có ${nextForm.description.length}).`;
+    }
+
+    if (nextForm.deadline) {
+      const parsed = new Date(`${nextForm.deadline}T00:00:00`);
+      if (Number.isNaN(parsed.getTime())) {
+        nextErrors.deadline = 'Ngày không hợp lệ.';
+      }
+    }
+
+    if (nextForm.taskCode.trim().length > 50) {
+      nextErrors.taskCode = `Mã tối đa 50 ký tự (hiện có ${nextForm.taskCode.length}).`;
+    }
+
+    if (isAdmin && !nextForm.studentId) {
+      nextErrors.studentId = 'Vui lòng chọn sinh viên cho nhiệm vụ này.';
+    }
+
+    return nextErrors;
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm((current) => ({ ...current, [name]: value }));
+    setErrors(validateTaskForm({ ...form, [name]: value }));
   };
 
   const handleFileChange = (e) => {
@@ -167,13 +202,29 @@ function TasksPage() {
     setEditTask(null);
     setForm(initialForm);
     setMessage('');
+    setErrors({});
   };
+
+  const formIsValid = useMemo(() => {
+    const validationErrors = validateTaskForm(form);
+    const studentOk = !isAdmin || Boolean(form.studentId);
+    return Object.keys(validationErrors).length === 0 && studentOk && !submittingForm;
+  }, [form, isAdmin, submittingForm]);
 
   const handleSave = async (e) => {
     e.preventDefault();
     setMessage('');
 
+    const validationErrors = validateTaskForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setMessage('Vui lòng kiểm tra lại thông tin nhiệm vụ.');
+      notifyError('Vui lòng kiểm tra lại thông tin nhiệm vụ.');
+      return;
+    }
+
     try {
+      setSubmittingForm(true);
       const payload = {
         title: form.title,
         description: form.description,
@@ -199,6 +250,8 @@ function TasksPage() {
     } catch (error) {
       setMessage(error.response?.data?.message || 'Lỗi khi lưu nhiệm vụ');
       notifyError(error.response?.data?.message || 'Lỗi khi lưu nhiệm vụ');
+    } finally {
+      setSubmittingForm(false);
     }
   };
 
@@ -486,7 +539,12 @@ function TasksPage() {
               <button className="btn outline" type="button" onClick={() => setSearchTerm('')}>Xóa tìm kiếm</button>
             </div>
             <div className="task-board-list">
-              {filteredTasks.map((task) => (
+              {loading ? (
+                <div className="loading-grid">
+                  <div className="skeleton" style={{ height: 106, borderRadius: 22 }} />
+                  <div className="skeleton" style={{ height: 106, borderRadius: 22 }} />
+                </div>
+              ) : filteredTasks.map((task) => (
                 <div
                   key={task.id}
                   className={`task-card task-list-item task-card-clickable ${getStatusClass(task.status)}`}
@@ -553,7 +611,7 @@ function TasksPage() {
                   </div>
                 </div>
               ))}
-              {!filteredTasks.length && <p className="empty-note">Không tìm thấy nhiệm vụ phù hợp.</p>}
+              {!loading && !filteredTasks.length && <p className="empty-note">Không tìm thấy nhiệm vụ phù hợp.</p>}
             </div>
           </div>
           <div className="tasks-sidebar-panel">
@@ -574,67 +632,76 @@ function TasksPage() {
                   <h3>{editTask ? 'Sửa nhiệm vụ' : 'Tạo nhiệm vụ mới'}</h3>
                   <span className="sidebar-card-pill">Metadata</span>
                 </div>
-                <form className="form-stack" onSubmit={handleSave}>
-                  <label className="profile-field">
-                    <span>Tiêu đề</span>
-                    <input name="title" value={form.title} onChange={handleChange} required />
-                  </label>
-                  <label className="profile-field">
-                    <span>Mô tả</span>
-                    <textarea name="description" value={form.description} onChange={handleChange} rows={4} />
-                  </label>
-                  <div className="form-grid-two">
+                {loading ? (
+                  <SkeletonForm fields={6} />
+                ) : (
+                  <form className="form-stack" onSubmit={handleSave}>
                     <label className="profile-field">
-                      <span>Ngày giao</span>
-                      <input type="date" name="assignedAt" value={form.assignedAt} onChange={handleChange} />
+                      <span>Tiêu đề</span>
+                      <input name="title" value={form.title} onChange={handleChange} aria-invalid={Boolean(errors.title)} required />
+                      {errors.title && <small className="field-error">{errors.title}</small>}
                     </label>
                     <label className="profile-field">
-                      <span>Deadline</span>
-                      <input type="date" name="deadline" value={form.deadline} onChange={handleChange} />
+                      <span>Mô tả</span>
+                      <textarea name="description" value={form.description} onChange={handleChange} rows={4} aria-invalid={Boolean(errors.description)} />
+                      {errors.description && <small className="field-error">{errors.description}</small>}
                     </label>
-                  </div>
-                  <div className="form-grid-two">
+                    <div className="form-grid-two">
+                      <label className="profile-field">
+                        <span>Ngày giao</span>
+                        <input type="date" name="assignedAt" value={form.assignedAt} onChange={handleChange} />
+                      </label>
+                      <label className="profile-field">
+                        <span>Deadline</span>
+                        <input type="date" name="deadline" value={form.deadline} onChange={handleChange} aria-invalid={Boolean(errors.deadline)} />
+                        {errors.deadline && <small className="field-error">{errors.deadline}</small>}
+                      </label>
+                    </div>
+                    <div className="form-grid-two">
+                      <label className="profile-field">
+                        <span>Danh mục</span>
+                        <input name="category" value={form.category} onChange={handleChange} placeholder="Ví dụ: Backend" />
+                      </label>
+                      <label className="profile-field">
+                        <span>Mã nhiệm vụ</span>
+                        <input name="taskCode" value={form.taskCode} onChange={handleChange} placeholder="Ví dụ: TASK-101" aria-invalid={Boolean(errors.taskCode)} />
+                        {errors.taskCode && <small className="field-error">{errors.taskCode}</small>}
+                      </label>
+                    </div>
+                    <div className="form-grid-two">
+                      <label className="profile-field">
+                        <span>Ưu tiên</span>
+                        <select name="priority" value={form.priority} onChange={handleChange}>
+                          {priorityOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="profile-field">
+                        <span>Trạng thái</span>
+                        <select name="status" value={form.status} onChange={handleChange}>
+                          {statusOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                     <label className="profile-field">
-                      <span>Danh mục</span>
-                      <input name="category" value={form.category} onChange={handleChange} placeholder="Ví dụ: Backend" />
-                    </label>
-                    <label className="profile-field">
-                      <span>Mã nhiệm vụ</span>
-                      <input name="taskCode" value={form.taskCode} onChange={handleChange} placeholder="Ví dụ: TASK-101" />
-                    </label>
-                  </div>
-                  <div className="form-grid-two">
-                    <label className="profile-field">
-                      <span>Ưu tiên</span>
-                      <select name="priority" value={form.priority} onChange={handleChange}>
-                        {priorityOptions.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
+                      <span>Student</span>
+                      <select name="studentId" value={form.studentId} onChange={handleChange} aria-invalid={Boolean(errors.studentId)} required>
+                        <option value="">Chọn sinh viên</option>
+                        {Array.isArray(students) ? students.map((student) => (
+                          <option key={student.id} value={student.id}>{student.fullName} ({student.studentCode})</option>
+                        )) : null}
                       </select>
+                      {errors.studentId && <small className="field-error">{errors.studentId}</small>}
                     </label>
-                    <label className="profile-field">
-                      <span>Trạng thái</span>
-                      <select name="status" value={form.status} onChange={handleChange}>
-                        {statusOptions.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <label className="profile-field">
-                    <span>Student</span>
-                    <select name="studentId" value={form.studentId} onChange={handleChange} required>
-                      <option value="">Chọn sinh viên</option>
-                      {Array.isArray(students) ? students.map((student) => (
-                        <option key={student.id} value={student.id}>{student.fullName} ({student.studentCode})</option>
-                      )) : null}
-                    </select>
-                  </label>
-                  <div className="button-row">
-                    <button className="btn" type="submit">{editTask ? 'Cập nhật' : 'Tạo nhiệm vụ'}</button>
-                    <button className="btn outline" type="button" onClick={resetForm}>Hủy</button>
-                  </div>
-                </form>
+                    <div className="button-row">
+                      <button className="btn" type="submit" disabled={!formIsValid}>{submittingForm ? 'Đang lưu...' : editTask ? 'Cập nhật' : 'Tạo nhiệm vụ'}</button>
+                      <button className="btn outline" type="button" onClick={resetForm}>Hủy</button>
+                    </div>
+                  </form>
+                )}
               </section>
             )}
           </div>
@@ -704,33 +771,33 @@ function TasksPage() {
 
               <div className="info-box-grid">
                 <div className="info-box">
-                  <span className="info-box-label">📅 Ngày giao</span>
+                  <span className="info-box-label"><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4" /><path d="M8 3v4" /><path d="M3 10h18" /></svg></span>Ngày giao</span>
                   <strong>{selectedTask.assignedAt ? new Date(selectedTask.assignedAt).toLocaleDateString('vi-VN') : '—'}</strong>
                 </div>
                 <div className="info-box">
-                  <span className="info-box-label">⏰ Hạn hoàn thành</span>
+                  <span className="info-box-label"><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg></span>Hạn hoàn thành</span>
                   <strong>{selectedTask.deadline ? new Date(selectedTask.deadline).toLocaleDateString('vi-VN') : '—'}</strong>
                 </div>
                 <div className="info-box">
-                  <span className="info-box-label">🎯 Mức độ ưu tiên</span>
+                  <span className="info-box-label"><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="4" /></svg></span>Mức độ ưu tiên</span>
                   <strong>{getPriorityLabel(selectedTask.priority)}</strong>
                 </div>
                 <div className="info-box">
-                  <span className="info-box-label">🗂️ Danh mục</span>
+                  <span className="info-box-label"><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 4h10" /><path d="M9 12h10" /><path d="M9 20h10" /><path d="M5 4h.01" /><path d="M5 12h.01" /><path d="M5 20h.01" /></svg></span>Danh mục</span>
                   <strong>{selectedTask.category || '—'}</strong>
                 </div>
               </div>
 
               <div className="task-modal-meta">
                 <div className="task-modal-detail-card">
-                  <p><strong>👤 Sinh viên:</strong> {getStudentName(selectedTask.studentId)}</p>
-                  <p><strong>🔢 Mã nhiệm vụ:</strong> {selectedTask.taskCode || '—'}</p>
-                  {selectedTask.submissionComment && <p><strong>📝 Ghi chú nộp:</strong> {selectedTask.submissionComment}</p>}
-                  {selectedTask.submittedAt && <p><strong>🕒 Thời gian nộp:</strong> {new Date(selectedTask.submittedAt).toLocaleString('vi-VN')}</p>}
+                  <p><strong><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" /><path d="M5 20a7 7 0 0 1 14 0" /></svg></span> Sinh viên:</strong> {getStudentName(selectedTask.studentId)}</p>
+                  <p><strong><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3h8l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M15 3v5h5" /></svg></span> Mã nhiệm vụ:</strong> {selectedTask.taskCode || '—'}</p>
+                  {selectedTask.submissionComment && <p><strong><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M7 3h8l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M15 3v5h5" /></svg></span> Ghi chú nộp:</strong> {selectedTask.submissionComment}</p>}
+                  {selectedTask.submittedAt && <p><strong><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></svg></span> Thời gian nộp:</strong> {new Date(selectedTask.submittedAt).toLocaleString('vi-VN')}</p>}
                   {selectedTask.fileUrl ? (
-                    <p><strong>📎 File nộp:</strong> <a href={`${BACKEND_URL}${selectedTask.fileUrl}`} target="_blank" rel="noreferrer">{selectedTask.fileName || 'Xem file'}</a></p>
+                    <p><strong><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l2-2a5 5 0 0 0-7.07-7.07l-1.18 1.18" /><path d="M14 11a5 5 0 0 0-7.07 0l-2 2a5 5 0 1 0 7.07 7.07l1.18-1.18" /></svg></span> File nộp:</strong> <a href={`${BACKEND_URL}${selectedTask.fileUrl}`} target="_blank" rel="noreferrer">{selectedTask.fileName || 'Xem file'}</a></p>
                   ) : (
-                    <p><strong>📎 File nộp:</strong> Chưa có</p>
+                    <p><strong><span className="info-box-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l2-2a5 5 0 0 0-7.07-7.07l-1.18 1.18" /><path d="M14 11a5 5 0 0 0-7.07 0l-2 2a5 5 0 1 0 7.07 7.07l1.18-1.18" /></svg></span> File nộp:</strong> Chưa có</p>
                   )}
                 </div>
               </div>

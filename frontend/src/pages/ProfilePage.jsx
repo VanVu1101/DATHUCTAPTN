@@ -15,6 +15,7 @@ import {
 import { getAllPeriods } from '../services/periodService';
 import { changePassword, forgotPassword } from '../services/authService';
 import { getMajors } from '../services/majorService';
+import { SkeletonCard, SkeletonForm } from '../components/SkeletonLoader';
 
 const universityOptions = [
   'Đại học Bách Khoa Hà Nội',
@@ -80,6 +81,9 @@ function ProfilePage() {
   const [majors, setMajors] = useState([]);
   const [message, setMessage] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [formErrors, setFormErrors] = useState({});
+  const [savingProfile, setSavingProfile] = useState(false);
   const [passwordMessage, setPasswordMessage] = useState('');
   const [accountMode, setAccountMode] = useState('change');
   const [passwordForm, setPasswordForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
@@ -111,6 +115,7 @@ function ProfilePage() {
   useEffect(() => {
     const loadProfile = async () => {
       try {
+        setProfileLoading(true);
         setDocumentsLoading(true);
         const [profileRes, periodsRes, documentsRes, majorsRes] = await Promise.all([
           getMyProfile(),
@@ -168,6 +173,7 @@ function ProfilePage() {
         setMessage('Không thể tải hồ sơ');
       } finally {
         setDocumentsLoading(false);
+        setProfileLoading(false);
       }
     };
 
@@ -192,6 +198,33 @@ function ProfilePage() {
     { title: 'Nộp báo cáo', completed: reportProgress >= 100 },
   ];
 
+  const validateProfileForm = (nextForm = form) => {
+    const nextErrors = {};
+
+    if (!nextForm.fullName.trim()) {
+      nextErrors.fullName = 'Họ tên là bắt buộc.';
+    } else if (nextForm.fullName.trim().length > 80) {
+      nextErrors.fullName = 'Họ tên tối đa 80 ký tự.';
+    }
+
+    if (nextForm.phoneNumber && !/^\d{8,15}$/.test(nextForm.phoneNumber)) {
+      nextErrors.phoneNumber = 'Số điện thoại chỉ gồm 8-15 chữ số.';
+    }
+
+    if (nextForm.linkedin && !/^https?:\/\//i.test(nextForm.linkedin.trim())) {
+      nextErrors.linkedin = 'Link LinkedIn phải bắt đầu bằng http:// hoặc https://.';
+    }
+
+    if (nextForm.emergencyPhone && !/^\d{8,15}$/.test(nextForm.emergencyPhone)) {
+      nextErrors.emergencyPhone = 'Số liên hệ khẩn cấp chỉ gồm 8-15 chữ số.';
+    }
+
+    return nextErrors;
+  };
+
+  const profileFormValidation = useMemo(() => validateProfileForm(form), [form]);
+  const profileFormIsValid = useMemo(() => Object.keys(profileFormValidation).length === 0 && !savingProfile, [profileFormValidation, savingProfile]);
+
   const displayInitials = useMemo(() => {
     if (!profile?.fullName) return 'AN';
     return profile.fullName
@@ -208,7 +241,11 @@ function ProfilePage() {
     if (name === 'technicalSkills' || name === 'softSkills' || name === 'languages') {
       setCurrentSkills((current) => ({ ...current, [name]: value }));
     }
-    setForm((current) => ({ ...current, [name]: value }));
+    setForm((current) => {
+      const nextForm = { ...current, [name]: value };
+      setFormErrors(validateProfileForm(nextForm));
+      return nextForm;
+    });
   };
 
   const handleFileChange = (e) => {
@@ -446,7 +483,15 @@ function ProfilePage() {
     e.preventDefault();
     setMessage('');
 
+    const validationErrors = validateProfileForm(form);
+    if (Object.keys(validationErrors).length > 0) {
+      setFormErrors(validationErrors);
+      setMessage('Vui lòng kiểm tra lại thông tin hồ sơ.');
+      return;
+    }
+
     try {
+      setSavingProfile(true);
       const payload = {
         fullName: form.fullName || profile?.fullName || '',
         phoneNumber: form.phoneNumber,
@@ -472,11 +517,14 @@ function ProfilePage() {
         const nextProfile = res.data || null;
         setProfile(nextProfile);
         persistProfile(nextProfile);
+        setFormErrors({});
         setMessage('Cập nhật hồ sơ thành công');
         setEditing(false);
       }
     } catch (error) {
       setMessage(error.response?.data?.message || 'Cập nhật thất bại');
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -522,6 +570,26 @@ function ProfilePage() {
     }
   };
 
+  if (profileLoading) {
+    return (
+      <div className="page-shell profile-page">
+        <section className="profile-hero card">
+          <div className="profile-header">
+            <SkeletonForm fields={6} />
+          </div>
+        </section>
+        <div className="profile-summary-grid">
+          <SkeletonCard className="summary-card" />
+          <SkeletonCard className="summary-card" />
+        </div>
+        <div className="loading-grid">
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-shell profile-page">
       <section className="profile-hero card">
@@ -535,6 +603,8 @@ function ProfilePage() {
                   <img
                     src={profile.profileImageUrl}
                     alt="avatar"
+                    loading="lazy"
+                    decoding="async"
                     style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }}
                     onError={async () => {
                       console.warn('Avatar image failed to load:', profile.profileImageUrl);
@@ -560,7 +630,7 @@ function ProfilePage() {
             <div className="avatar-action">
                 {avatarPreviewUrl ? (
                   <div className="avatar-preview-actions">
-                    <img src={avatarPreviewUrl} alt="preview" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, marginRight: 8 }} />
+                    <img src={avatarPreviewUrl} alt="preview" loading="lazy" decoding="async" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, marginRight: 8 }} />
                     <div>
                       <button className="btn" type="button" onClick={confirmUploadAvatar} disabled={avatarUploading}>{avatarUploading ? 'Đang tải...' : 'Xác nhận'}</button>
                       <button className="btn outline" type="button" onClick={cancelAvatarSelection} disabled={avatarUploading}>Hủy</button>
@@ -664,7 +734,8 @@ function ProfilePage() {
                   <form className="form-stack profile-form-onecol" onSubmit={handleSubmit}>
                     <label className="profile-field">
                       <span>Họ tên*</span>
-                      <input name="fullName" value={form.fullName} onChange={handleChange} />
+                      <input name="fullName" value={form.fullName} onChange={handleChange} aria-invalid={Boolean(formErrors.fullName)} />
+                      {formErrors.fullName && <small className="field-error">{formErrors.fullName}</small>}
                     </label>
                     <label className="profile-field">
                       <span>Email*</span>
@@ -678,8 +749,10 @@ function ProfilePage() {
                         inputMode="numeric"
                         pattern="[0-9]{8,15}"
                         value={form.phoneNumber}
+                        aria-invalid={Boolean(formErrors.phoneNumber)}
                         onChange={(e) => setForm((current) => ({ ...current, phoneNumber: e.target.value.replace(/\D/g, '') }))}
                       />
+                      {formErrors.phoneNumber && <small className="field-error">{formErrors.phoneNumber}</small>}
                     </label>
                     <label className="profile-field">
                       <span>Mã sinh viên</span>
@@ -692,7 +765,8 @@ function ProfilePage() {
                     </label>
                     <label className="profile-field">
                       <span>LinkedIn</span>
-                      <input name="linkedin" value={form.linkedin} onChange={handleChange} placeholder="https://linkedin.com/in/..." />
+                      <input name="linkedin" value={form.linkedin} onChange={handleChange} placeholder="https://linkedin.com/in/..." aria-invalid={Boolean(formErrors.linkedin)} />
+                      {formErrors.linkedin && <small className="field-error">{formErrors.linkedin}</small>}
                     </label>
                     <label className="profile-field">
                       <span>Trường</span>
@@ -751,8 +825,10 @@ function ProfilePage() {
                         inputMode="numeric"
                         pattern="[0-9]{8,15}"
                         value={form.emergencyPhone}
+                        aria-invalid={Boolean(formErrors.emergencyPhone)}
                         onChange={(e) => setForm((current) => ({ ...current, emergencyPhone: e.target.value.replace(/\D/g, '') }))}
                       />
+                      {formErrors.emergencyPhone && <small className="field-error">{formErrors.emergencyPhone}</small>}
                     </label>
                     <label className="profile-field">
                       <span>Doanh nghiệp / Đơn vị</span>
@@ -763,7 +839,7 @@ function ProfilePage() {
                       <input name="mentorName" value={form.mentorName} onChange={handleChange} />
                     </label>
                     <div className="button-row">
-                      <button className="btn" type="submit">Lưu hồ sơ</button>
+                      <button className="btn" type="submit" disabled={!profileFormIsValid}>{savingProfile ? 'Đang lưu...' : 'Lưu hồ sơ'}</button>
                       <button className="btn outline" type="button" onClick={() => setEditing(false)}>Hủy</button>
                     </div>
                   </form>
@@ -942,7 +1018,7 @@ function ProfilePage() {
                   </div>
                 </div>
                 {documentsLoading ? (
-                  <p>Đang tải danh sách tài liệu...</p>
+                  <div className="loading-grid"><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div>
                 ) : uploadedDocuments.length === 0 ? (
                   <p className="info-value">Chưa có tài liệu nào được upload.</p>
                 ) : (
@@ -1065,7 +1141,7 @@ function ProfilePage() {
             </div>
             <div className="profile-info-stack">
               <div className="settings-row">
-                <div className="settings-icon">✉️</div>
+                <div className="settings-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 6h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8l-4 3V7a1 1 0 0 1 1-1Z" /></svg></div>
                 <div className="settings-copy">
                   <p className="settings-label">Email khôi phục</p>
                   <p className="settings-value">{profile?.recoveryEmail || profile?.email || 'Chưa cập nhật'}</p>
@@ -1073,7 +1149,7 @@ function ProfilePage() {
                 <button className="btn outline small" type="button" disabled title="Tính năng đang phát triển">Thay đổi</button>
               </div>
               <div className="settings-row">
-                <div className="settings-icon">🔒</div>
+                <div className="settings-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V8a4 4 0 1 1 8 0v2" /></svg></div>
                 <div className="settings-copy">
                   <p className="settings-label">Xác thực 2 lớp</p>
                   <div className="settings-status-row">
@@ -1084,7 +1160,7 @@ function ProfilePage() {
                 <button className="btn outline small" type="button" disabled title="Tính năng đang phát triển">Thiết lập</button>
               </div>
               <div className="settings-row">
-                <div className="settings-icon">🔑</div>
+                <div className="settings-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="14" r="4" /><path d="M10 12V8a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M20 14v3" /></svg></div>
                 <div className="settings-copy">
                   <p className="settings-label">Đổi mật khẩu</p>
                   <p className="settings-value">Giữ tài khoản an toàn với mật khẩu mới.</p>

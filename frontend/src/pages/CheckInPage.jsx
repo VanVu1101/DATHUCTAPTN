@@ -455,6 +455,27 @@ function CheckInPage() {
     return [...scheduleEvents, ...meetingEvents];
   };
 
+  const upcomingEvents = useMemo(() => {
+    const items = [
+      ...schedules.map((schedule) => ({
+        id: `schedule-${schedule.id}`,
+        title: schedule.title || 'Lịch công việc',
+        detail: `${schedule.startDate || ''}${schedule.endDate && schedule.startDate !== schedule.endDate ? ` → ${schedule.endDate}` : ''}${schedule.startTime || schedule.endTime ? ` · ${schedule.startTime || schedule.endTime}` : ''}`,
+        badge: 'Công việc',
+        sortKey: `${schedule.endDate || schedule.startDate || '9999-12-31'}T${schedule.endTime || schedule.startTime || '23:59'}`,
+      })),
+      ...meetings.map((meeting) => ({
+        id: `meeting-${meeting.id}`,
+        title: meeting.title || 'Lịch họp',
+        detail: `${meeting.meetingDate || ''}${meeting.meetingTime ? ` · ${meeting.meetingTime}` : ''}`,
+        badge: 'Họp',
+        sortKey: `${meeting.meetingDate || '9999-12-31'}T${meeting.meetingTime || '23:59'}`,
+      })),
+    ].sort((a, b) => a.sortKey.localeCompare(b.sortKey)).slice(0, 4);
+
+    return items;
+  }, [schedules, meetings]);
+
   const selectedDayEvents = useMemo(() => getEventsForDate(selectedDate), [schedules, meetings, selectedDate]);
 
   const weekStart = useMemo(() => getWeekStart(new Date(today)), [today]);
@@ -951,6 +972,29 @@ function CheckInPage() {
       </div>}
 
       <div className="checkin-main-grid">
+        <section className="card">
+          <div className="card-header">
+            <h3>Sự kiện sắp tới</h3>
+            <span className="badge">Lịch họp và công việc</span>
+          </div>
+          {upcomingEvents.length === 0 ? (
+            <div className="empty-state-card">Chưa có sự kiện nào sắp diễn ra.</div>
+          ) : (
+            <ul className="timeline-list">
+              {upcomingEvents.map((event) => (
+                <li key={event.id} className="timeline-item upcoming">
+                  <div>
+                    <div className="timeline-label">{event.badge}</div>
+                    <div className="timeline-title">{event.title}</div>
+                    <div className="timeline-date">{event.detail}</div>
+                  </div>
+                  <span className="badge">{event.badge}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         <section className="card calendar-card">
           <div className="card-header">
             <div>
@@ -1228,7 +1272,10 @@ function CheckInPage() {
         </div>
 
         {loading ? (
-          <p className="empty-text">Đang tải lịch...</p>
+          <div className="loading-grid">
+            <div className="skeleton" style={{ height: 84, borderRadius: 18 }} />
+            <div className="skeleton" style={{ height: 84, borderRadius: 18 }} />
+          </div>
         ) : selectedDaySchedules.length === 0 && selectedDayMeetings.length === 0 ? (
           <p className="empty-text">Chưa có lịch nào được tạo.</p>
         ) : (

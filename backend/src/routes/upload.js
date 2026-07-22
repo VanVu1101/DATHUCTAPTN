@@ -1,14 +1,45 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const { verifyToken } = require('../middlewares/auth');
+const { uploadFile } = require('../config/s3');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const region = process.env.AWS_REGION || 'ap-southeast-1';
 const bucket = process.env.AWS_S3_BUCKET || process.env.AWS_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME;
 const publicRead = String(process.env.AWS_S3_PUBLIC_READ || '').toLowerCase() === 'true';
 const allowAclPublicRead = String(process.env.AWS_S3_ALLOW_ACL_PUBLIC_READ || '').toLowerCase() === 'true';
 const signedUrlExpiresIn = Number(process.env.AWS_S3_SIGNED_URL_EXPIRES_IN || process.env.AWS_S3_URL_EXPIRES_IN || 86400);
+
+router.post('/', verifyToken, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: 'Vui lòng chọn tệp để tải lên' });
+        }
+
+        const { folder = 'uploads' } = req.body;
+        const uploaded = await uploadFile({
+            fileBuffer: req.file.buffer,
+            fileName: req.file.originalname,
+            contentType: req.file.mimetype || 'application/octet-stream',
+            folder
+        });
+
+        const attachmentUrl = typeof uploaded === 'string' ? uploaded : uploaded?.url;
+        res.json({
+            success: true,
+            attachmentUrl,
+            attachmentName: req.file.originalname,
+            url: attachmentUrl
+        });
+    } catch (error) {
+        console.error('upload error', error);
+        res.status(500).json({ success: false, message: 'Lỗi khi tải tệp đính kèm' });
+    }
+});
 
 router.post('/presign', verifyToken, async (req, res) => {
     try {

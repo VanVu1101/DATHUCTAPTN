@@ -14,6 +14,9 @@ import { getSchedules } from '../services/scheduleService';
 import { getMyTasks } from '../services/taskService';
 import { getAllPeriods } from '../services/periodService';
 import { getEvaluationByInternship } from '../services/evaluationService';
+import { getNotifications } from '../services/notificationService';
+import AppCard from '../components/AppCard';
+import AppButton from '../components/AppButton';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -128,6 +131,7 @@ function HomePage() {
   const [weeklyReportsSeries, setWeeklyReportsSeries] = useState([]);
   const [periods, setPeriods] = useState([]);
   const [user, setUser] = useState(null);
+  const [notifications, setNotifications] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
   const [selectedEvaluation, setSelectedEvaluation] = useState(null);
   const [scoreModalOpen, setScoreModalOpen] = useState(false);
@@ -190,6 +194,15 @@ function HomePage() {
 
         if (summaryResult.status === 'fulfilled' && summaryResult.value?.success) {
           setSummary(summaryResult.value.data || null);
+        }
+
+        try {
+          const notificationsRes = await getNotifications();
+          if (Array.isArray(notificationsRes?.data)) setNotifications(notificationsRes.data);
+          else if (Array.isArray(notificationsRes)) setNotifications(notificationsRes);
+          else setNotifications([]);
+        } catch (e) {
+          setNotifications([]);
         }
 
         const loadedPeriods = periodsResult.status === 'fulfilled' && periodsResult.value?.success
@@ -359,6 +372,43 @@ function HomePage() {
     return [...taskCards, ...scheduleCards].slice(0, 4);
   }, [tasks, schedules]);
 
+  const upcomingItems = useMemo(() => {
+    const items = [];
+
+    meetings.forEach((meeting) => {
+      items.push({
+        id: `meeting-${meeting.id}`,
+        title: meeting.title || 'Lịch họp',
+        subtitle: meeting.meetingDate ? `${formatDateVN(meeting.meetingDate)}${meeting.meetingTime ? ` · ${meeting.meetingTime}` : ''}` : 'Sắp diễn ra',
+        badge: 'Họp',
+        dateValue: `${meeting.meetingDate || '9999-12-31'}T${meeting.meetingTime || '23:59'}`,
+      });
+    });
+
+    schedules.forEach((schedule) => {
+      items.push({
+        id: `schedule-${schedule.id}`,
+        title: schedule.title || 'Lịch công việc',
+        subtitle: schedule.endDate || schedule.startDate ? `${formatDateVN(schedule.endDate || schedule.startDate)}${schedule.endTime || schedule.startTime ? ` · ${schedule.endTime || schedule.startTime}` : ''}` : 'Sắp diễn ra',
+        badge: schedule.type === 'MEETING' ? 'Họp' : 'Công việc',
+        dateValue: `${schedule.endDate || schedule.startDate || '9999-12-31'}T${schedule.endTime || schedule.startTime || '23:59'}`,
+      });
+    });
+
+    tasks.forEach((task) => {
+      if (!task.deadline) return;
+      items.push({
+        id: `task-${task.id}`,
+        title: task.title || 'Nhiệm vụ',
+        subtitle: `Hạn ${formatDateVN(task.deadline)}`,
+        badge: task.status === 'DONE' ? 'Xong' : 'Task',
+        dateValue: `${task.deadline}T23:59`,
+      });
+    });
+
+    return items.sort((a, b) => a.dateValue.localeCompare(b.dateValue)).slice(0, 4);
+  }, [meetings, schedules, tasks]);
+
   const activityItems = useMemo(() => {
     const items = [];
 
@@ -474,8 +524,8 @@ function HomePage() {
         </div>
       </section>
 
-      {loading && user && <section className="card home-loading">Đang tải dữ liệu...</section>}
-      {!loading && user && taskLoading && <section className="card home-loading">Đang tải nhiệm vụ...</section>}
+      {loading && user && <section className="card home-loading"><div className="loading-grid"><div className="skeleton" style={{ height: 92, borderRadius: 18 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div></section>}
+      {!loading && user && taskLoading && <section className="card home-loading"><div className="loading-grid"><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /><div className="skeleton" style={{ height: 72, borderRadius: 16 }} /></div></section>}
 
           {overviewCards.length > 0 && (
             <section className="stats-row">
@@ -491,6 +541,50 @@ function HomePage() {
               ))}
             </section>
           )}
+
+      {(notifications.length > 0 || upcomingItems.length > 0) && (
+        <AppCard title="Thông báo & lịch sắp tới" subtitle="Tổng hợp các cập nhật và sự kiện quan trọng" actions={<AppButton variant="outline" onClick={() => navigate('/notifications')}>Xem tất cả</AppButton>}>
+          <div className="demo-panel-grid">
+            <div className="demo-panel-card">
+              <h4>Thông báo mới</h4>
+              {notifications.length === 0 ? (
+                <div className="demo-panel-empty">Chưa có thông báo mới.</div>
+              ) : (
+                <ul className="timeline-list">
+                  {notifications.slice(0, 3).map((item) => (
+                    <li key={item.id} className="timeline-item upcoming">
+                      <div>
+                        <div className="timeline-label">{item.title}</div>
+                        <div className="timeline-title">{item.message}</div>
+                      </div>
+                      <small>{new Date(item.createdAt).toLocaleDateString('vi-VN')}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="demo-panel-card">
+              <h4>Sự kiện sắp tới</h4>
+              {upcomingItems.length === 0 ? (
+                <div className="demo-panel-empty">Chưa có sự kiện nào sắp diễn ra.</div>
+              ) : (
+                <ul className="timeline-list">
+                  {upcomingItems.map((item) => (
+                    <li key={item.id} className="timeline-item upcoming">
+                      <div>
+                        <div className="timeline-label">{item.badge}</div>
+                        <div className="timeline-title">{item.title}</div>
+                        <div className="timeline-date">{item.subtitle}</div>
+                      </div>
+                      <span className="badge">{item.badge}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </AppCard>
+      )}
 
       {(taskItems.length > 0 || activityItems.length > 0 || canShowRightColumn) && (
         <section className={`main-columns ${canShowRightColumn ? '' : 'main-columns--single'}`}>

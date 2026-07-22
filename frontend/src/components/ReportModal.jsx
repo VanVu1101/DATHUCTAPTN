@@ -15,6 +15,8 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
   const [message, setMessage] = useState('');
   const [status, setStatus] = useState('');
   const [file, setFile] = useState(null);
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
   const [content, setContent] = useState('');
   const [preview, setPreview] = useState(null);
   const [form, setForm] = useState(createInitialState(periods[0]?.id ? String(periods[0].id) : ''));
@@ -72,11 +74,40 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
     return 'Nộp báo cáo tuần';
   }, [mode, weeklyReport]);
 
+  const validateForm = () => {
+    const nextErrors = {};
+
+    if (mode === 'create' || mode === 'edit-weekly') {
+      if (!form.periodId) nextErrors.periodId = 'Vui lòng chọn đợt thực tập.';
+      if (!form.weekNumber) nextErrors.weekNumber = 'Vui lòng nhập số tuần.';
+      if (!form.title.trim()) nextErrors.title = 'Tiêu đề báo cáo là bắt buộc.';
+      if (!form.description.trim()) nextErrors.description = 'Mô tả yêu cầu là bắt buộc.';
+      if (form.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(form.dueDate)) nextErrors.dueDate = 'Ngày không hợp lệ.';
+    } else if (mode === 'submit') {
+      if (!content.trim() && !file) nextErrors.content = 'Vui lòng nhập nội dung hoặc đính kèm ít nhất một file.';
+    } else if (mode === 'edit') {
+      if (!content.trim()) nextErrors.content = 'Nội dung báo cáo là bắt buộc.';
+    }
+
+    return nextErrors;
+  };
+
+  const submitDisabled = useMemo(() => submitting || Object.keys(validateForm()).length > 0, [content, file, form, mode, submitting]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage('');
 
+    const validationErrors = validateForm();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setStatus('error');
+      setMessage('Vui lòng kiểm tra lại thông tin báo cáo.');
+      return;
+    }
+
     try {
+      setSubmitting(true);
       if (mode === 'create') {
         const payload = new FormData();
         payload.append('periodId', String(form.periodId));
@@ -163,12 +194,15 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
     } catch (error) {
       setStatus('error');
       setMessage(error.response?.data?.message || (mode === 'create' ? 'Lỗi khi tạo báo cáo tuần' : mode === 'edit' ? 'Lỗi khi lưu báo cáo' : 'Lỗi khi nộp báo cáo'));
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleCreateChange = (event) => {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+    setErrors((current) => ({ ...current, [name]: undefined }));
   };
 
   if (!open) return null;
@@ -186,28 +220,33 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
             <>
               <label className="profile-field">
                 <span>Đợt thực tập</span>
-                <select name="periodId" value={form.periodId} onChange={handleCreateChange} required>
+                <select name="periodId" value={form.periodId} onChange={handleCreateChange} aria-invalid={Boolean(errors.periodId)} required>
                   <option value="">Chọn đợt thực tập</option>
                   {periods.map((period) => (
                     <option key={period.id} value={period.id}>{period.name}</option>
                   ))}
                 </select>
+                {errors.periodId && <small className="field-error">{errors.periodId}</small>}
               </label>
               <label className="profile-field">
                 <span>Tuần số</span>
-                <input type="number" min="1" name="weekNumber" placeholder="Tuần số" value={form.weekNumber} onChange={handleCreateChange} required />
+                <input type="number" min="1" name="weekNumber" placeholder="Tuần số" value={form.weekNumber} onChange={handleCreateChange} aria-invalid={Boolean(errors.weekNumber)} required />
+                {errors.weekNumber && <small className="field-error">{errors.weekNumber}</small>}
               </label>
               <label className="profile-field">
                 <span>Tiêu đề báo cáo</span>
-                <input type="text" name="title" placeholder="Tiêu đề báo cáo" value={form.title} onChange={handleCreateChange} required />
+                <input type="text" name="title" placeholder="Tiêu đề báo cáo" value={form.title} onChange={handleCreateChange} aria-invalid={Boolean(errors.title)} required />
+                {errors.title && <small className="field-error">{errors.title}</small>}
               </label>
               <label className="profile-field">
                 <span>Mô tả yêu cầu</span>
-                <textarea rows="5" name="description" placeholder="Mô tả yêu cầu báo cáo" value={form.description} onChange={handleCreateChange} required />
+                <textarea rows="5" name="description" placeholder="Mô tả yêu cầu báo cáo" value={form.description} onChange={handleCreateChange} aria-invalid={Boolean(errors.description)} required />
+                {errors.description && <small className="field-error">{errors.description}</small>}
               </label>
               <label className="profile-field">
                 <span>Hạn nộp (tuỳ chọn)</span>
-                <input type="date" min={new Date().toISOString().slice(0, 10)} name="dueDate" value={form.dueDate} onChange={handleCreateChange} />
+                <input type="date" min={new Date().toISOString().slice(0, 10)} name="dueDate" value={form.dueDate} onChange={handleCreateChange} aria-invalid={Boolean(errors.dueDate)} />
+                {errors.dueDate && <small className="field-error">{errors.dueDate}</small>}
               </label>
               <label className="profile-field">
                 <span>Tệp yêu cầu (tuỳ chọn)</span>
@@ -222,7 +261,8 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
               </div>
               <label className="profile-field">
                 <span>Nội dung báo cáo</span>
-                <textarea rows="6" placeholder="Nội dung báo cáo" value={content} onChange={(e) => setContent(e.target.value)} required />
+                <textarea rows="6" placeholder="Nội dung báo cáo" value={content} onChange={(e) => { setContent(e.target.value); setErrors((current) => ({ ...current, content: undefined })); }} aria-invalid={Boolean(errors.content)} required />
+                {errors.content && <small className="field-error">{errors.content}</small>}
               </label>
               <label className="profile-field">
                 <span>Trạng thái</span>
@@ -257,7 +297,8 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
               )}
               <label className="profile-field">
                 <span>Nội dung báo cáo</span>
-                <textarea rows="6" placeholder="Ghi chú ngắn cho báo cáo (không bắt buộc)" value={content} onChange={(e) => setContent(e.target.value)} />
+                <textarea rows="6" placeholder="Ghi chú ngắn cho báo cáo (không bắt buộc)" value={content} onChange={(e) => { setContent(e.target.value); setErrors((current) => ({ ...current, content: undefined })); }} aria-invalid={Boolean(errors.content)} />
+                {errors.content && <small className="field-error">{errors.content}</small>}
               </label>
               <label className="profile-field">
                 <span>Đính kèm file</span>
@@ -268,7 +309,7 @@ function ReportModal({ open, onClose, mode = 'submit', weeklyReport = null, peri
           )}
 
           <div className="button-row">
-            <button className="btn" type="submit">{mode === 'create' ? 'Tạo tuần báo cáo' : mode === 'edit-weekly' || mode === 'edit' ? 'Lưu thay đổi' : 'Nộp báo cáo'}</button>
+            <button className="btn" type="submit" disabled={submitDisabled}>{submitting ? 'Đang gửi...' : mode === 'create' ? 'Tạo tuần báo cáo' : mode === 'edit-weekly' || mode === 'edit' ? 'Lưu thay đổi' : 'Nộp báo cáo'}</button>
             <button type="button" className="btn outline" onClick={onClose}>Hủy</button>
           </div>
         </form>
