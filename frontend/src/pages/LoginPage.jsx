@@ -10,6 +10,11 @@ function LoginPage() {
   const [message, setMessage] = useState('');
   const [passwordHint, setPasswordHint] = useState('');
   const [isResetting, setIsResetting] = useState(false);
+  const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotMessage, setForgotMessage] = useState('');
+  const [forgotStatus, setForgotStatus] = useState('idle');
+  const [forgotLink, setForgotLink] = useState('');
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -115,21 +120,77 @@ function LoginPage() {
     }
   };
 
-  const handleForgotPassword = async () => {
-    if (!form.email) {
-      setMessage('Vui lòng nhập email trước khi gửi yêu cầu');
+  const handleForgotPassword = async (e) => {
+    e?.preventDefault();
+    const email = forgotEmail.trim().toLowerCase();
+
+    if (!email) {
+      setForgotStatus('error');
+      setForgotMessage('Vui lòng nhập email trước khi gửi yêu cầu');
       return;
     }
 
     try {
       setIsResetting(true);
-      const res = await requestPasswordReset(form.email);
-      setMessage(res?.message || 'Đã gửi yêu cầu reset mật khẩu');
+      setForgotStatus('idle');
+      setForgotMessage('Đang gửi yêu cầu...');
+      const res = await requestPasswordReset(email);
+      const nextMessage = res?.message || 'Một email chứa liên kết đặt lại mật khẩu đã được gửi tới hộp thư của bạn.';
+      setForgotStatus(res?.success ? 'success' : 'error');
+      setForgotMessage(nextMessage);
+      setMessage(nextMessage);
+      setForgotLink(res?.resetLink || '');
+      if (res?.success) {
+        setForm((prev) => ({ ...prev, email }));
+      }
     } catch (error) {
-      setMessage(error.response?.data?.message || 'Không thể gửi email reset mật khẩu');
+      const fallbackMessage = error.response?.data?.message || 'Không thể gửi email reset mật khẩu';
+      setForgotStatus('error');
+      setForgotMessage(fallbackMessage);
+      setMessage(fallbackMessage);
+      setForgotLink('');
     } finally {
       setIsResetting(false);
     }
+  };
+
+  const openForgotModal = () => {
+    setForgotEmail(form.email || '');
+    setForgotMessage('');
+    setForgotStatus('idle');
+    setForgotLink('');
+    setIsForgotOpen(true);
+  };
+
+  const copyResetLink = async () => {
+    if (!forgotLink) {
+      setForgotStatus('error');
+      setForgotMessage('Chưa có liên kết khôi phục để sao chép.');
+      setMessage('Chưa có liên kết khôi phục để sao chép.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(forgotLink);
+      setForgotStatus('success');
+      setForgotMessage('Đã sao chép liên kết khôi phục vào bộ nhớ tạm.');
+      setMessage('Đã sao chép liên kết khôi phục vào bộ nhớ tạm.');
+    } catch (error) {
+      setForgotStatus('error');
+      setForgotMessage('Không thể sao chép tự động. Vui lòng copy liên kết ở dưới.');
+      setMessage('Không thể sao chép tự động. Vui lòng copy liên kết ở dưới.');
+    }
+  };
+
+  const openResetLink = () => {
+    if (!forgotLink) {
+      setForgotStatus('error');
+      setForgotMessage('Chưa có liên kết khôi phục để mở.');
+      setMessage('Chưa có liên kết khôi phục để mở.');
+      return;
+    }
+
+    window.open(forgotLink, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -166,12 +227,54 @@ function LoginPage() {
           </form>
 
           {mode === 'login' && (
-            <button type="button" className="btn outline forgot-password-button" onClick={handleForgotPassword} disabled={isResetting}>
+            <button type="button" className="btn outline forgot-password-button" onClick={openForgotModal} disabled={isResetting}>
               {isResetting ? 'Đang gửi...' : 'Quên mật khẩu?'}
             </button>
           )}
 
           {message && <p className={`form-message ${message.includes('thành công') ? 'success' : ''}`}>{message}</p>}
+
+          {isForgotOpen && (
+            <div className="forgot-modal-overlay" onClick={() => setIsForgotOpen(false)}>
+              <div className="forgot-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="forgot-modal-header">
+                  <h3>Khôi phục mật khẩu</h3>
+                  <button type="button" className="ghost-button" onClick={() => setIsForgotOpen(false)}>×</button>
+                </div>
+                <p className="forgot-help-text">Nhập email của bạn. Nếu hệ thống không gửi được thư, hệ thống vẫn sẽ hiển thị liên kết khôi phục để bạn dùng ngay.</p>
+
+                <form onSubmit={handleForgotPassword} className="form-stack">
+                  <input
+                    name="forgotEmail"
+                    type="email"
+                    placeholder="Email đăng ký"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    required
+                  />
+
+                  {forgotMessage && (
+                    <p className={`form-message ${forgotStatus === 'success' ? 'success' : 'error'}`}>{forgotMessage}</p>
+                  )}
+
+                  {forgotLink && (
+                    <div className="forgot-link-box">
+                      <span>{forgotLink}</span>
+                      <div className="link-actions">
+                        <button type="button" className="ghost-button" onClick={copyResetLink}>Sao chép</button>
+                        <button type="button" className="ghost-button" onClick={openResetLink}>Mở</button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="modal-actions">
+                    <button type="submit" disabled={isResetting}>{isResetting ? 'Đang gửi...' : 'Gửi yêu cầu'}</button>
+                    <button type="button" className="btn outline" onClick={() => setIsForgotOpen(false)}>Đóng</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

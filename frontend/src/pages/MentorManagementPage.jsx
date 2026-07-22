@@ -48,7 +48,27 @@ function MentorManagementPage() {
     }
   };
 
-  useEffect(() => { load(); }, [studentSearch]);
+  useEffect(() => {
+    load();
+
+    const handleFocus = () => {
+      load();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        load();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [studentSearch]);
 
   const openCreate = () => {
     setEditing(null);

@@ -14,6 +14,8 @@ router.get('/profile/documents', studentController.getMyProfileDocuments);
 router.post('/profile/documents', upload.single('file'), studentController.uploadProfileDocument);
 router.delete('/profile/documents/:id', studentController.deleteProfileDocument);
 router.post('/profile/image', upload.single('file'), studentController.uploadProfileImage);
+router.delete('/profile/image', studentController.deleteProfileImage);
+router.get('/profile/image-presign', studentController.presignProfileImage);
 router.post('/profile/image-key', studentController.saveProfileImageKey);
 router.get('/', checkRole(['ADMIN']), studentController.getStudents);
 router.get('/majors', studentController.getMajors);

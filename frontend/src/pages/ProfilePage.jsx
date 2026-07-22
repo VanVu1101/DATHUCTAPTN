@@ -5,9 +5,12 @@ import {
   updateMyProfile,
   persistProfile,
   uploadProfileDocument,
+  uploadProfileDocumentWithConfig,
   getMyProfileDocuments,
   deleteProfileDocument,
   uploadProfileImage,
+  deleteProfileImage,
+  presignProfileImage,
 } from '../services/studentService';
 import { getAllPeriods } from '../services/periodService';
 import { changePassword, forgotPassword } from '../services/authService';
@@ -47,6 +50,7 @@ const profileTabs = [
   { key: 'overview', label: 'Tổng quan' },
   { key: 'skills', label: 'Kỹ năng' },
   { key: 'documents', label: 'Hồ sơ' },
+  { key: 'security', label: 'Bảo mật' },
 ];
 
 function InfoRow({ icon, label, value, hint }) {
@@ -70,9 +74,12 @@ function ProfilePage() {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarLoadError, setAvatarLoadError] = useState(false);
   const avatarInputRef = useRef(null);
+  const [selectedAvatarFile, setSelectedAvatarFile] = useState(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
   const [periods, setPeriods] = useState([]);
   const [majors, setMajors] = useState([]);
   const [message, setMessage] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [passwordMessage, setPasswordMessage] = useState('');
   const [accountMode, setAccountMode] = useState('change');
   const [passwordForm, setPasswordForm] = useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
@@ -214,16 +221,47 @@ function ProfilePage() {
     if (avatarInputRef.current) avatarInputRef.current.click();
   };
 
-  const handleAvatarChange = async (e) => {
+  const handleAvatarSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setAvatarUploading(true);
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    if (!allowedTypes.includes(file.type)) {
+      setMessage('Chỉ hỗ trợ ảnh JPG, PNG hoặc WebP.');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage('Ảnh quá lớn. Vui lòng chọn file nhỏ hơn 5MB.');
+      return;
+    }
+
+    // create preview
     try {
-      setAvatarLoadError(false);
+      const url = URL.createObjectURL(file);
+      setSelectedAvatarFile(file);
+      setAvatarPreviewUrl(url);
+      setMessage('');
+    } catch (err) {
+      setMessage('Không thể tạo preview cho ảnh');
+    }
+  };
+
+  const cancelAvatarSelection = () => {
+    if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
+    setSelectedAvatarFile(null);
+    setAvatarPreviewUrl(null);
+    if (avatarInputRef.current) avatarInputRef.current.value = '';
+  };
+
+  const confirmUploadAvatar = async () => {
+    if (!selectedAvatarFile) return;
+    setAvatarUploading(true);
+    setMessage('');
+    try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', selectedAvatarFile);
       const res = await uploadProfileImage(formData);
-      console.log('uploadProfileImage response', res);
       if (res?.success) {
         const next = res.data || null;
         const normalizedProfile = {
@@ -231,36 +269,43 @@ function ProfilePage() {
           ...(next || {}),
           profileImageUrl: next?.profileImageUrl || next?.avatar || profile?.profileImageUrl || profile?.avatar || '',
           avatar: next?.profileImageUrl || next?.avatar || profile?.profileImageUrl || profile?.avatar || '',
-          periodName: next?.periodName || profile?.periodName || '',
-          internshipDuration: next?.internshipDuration || profile?.internshipDuration || '',
-          enterpriseName: next?.enterpriseName || profile?.enterpriseName || '',
-          mentorName: next?.mentorName || profile?.mentorName || '',
-          className: next?.className || profile?.className || '',
-          majorName: next?.majorName || profile?.majorName || '',
-          headline: next?.headline || profile?.headline || '',
-          fullName: next?.fullName || profile?.fullName || '',
         };
         setProfile(normalizedProfile);
         persistProfile(normalizedProfile);
-        if (normalizedProfile) {
-          setForm((current) => ({
-            ...current,
-            roleHeadline: normalizedProfile.headline || current.roleHeadline || '',
-            majorName: normalizedProfile.majorName || current.majorName || '',
-            periodId: normalizedProfile.periodId != null ? String(normalizedProfile.periodId) : current.periodId || '',
-          }));
-        }
+        setForm((current) => ({
+          ...current,
+          roleHeadline: normalizedProfile.headline || current.roleHeadline || '',
+          majorName: normalizedProfile.majorName || current.majorName || '',
+          periodId: normalizedProfile.periodId != null ? String(normalizedProfile.periodId) : current.periodId || '',
+        }));
+        setMessage('Cập nhật ảnh đại diện thành công.');
+        cancelAvatarSelection();
       } else {
-        console.error('uploadProfileImage failed response', res);
         setMessage(res?.message || 'Upload ảnh thất bại');
       }
     } catch (err) {
-      console.error('uploadProfileImage error', err);
       setMessage(err.response?.data?.message || err.message || 'Upload ảnh thất bại');
     } finally {
       setAvatarUploading(false);
-      // reset input so same file can be reselected
-      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteAvatar = async () => {
+    if (!window.confirm('Bạn có chắc muốn xóa ảnh đại diện?')) return;
+    setAvatarUploading(true);
+    try {
+      const res = await deleteProfileImage();
+      if (res?.success) {
+        setProfile(res.data);
+        persistProfile(res.data);
+        setMessage('Đã xóa ảnh đại diện');
+      } else {
+        setMessage(res?.message || 'Xóa ảnh thất bại');
+      }
+    } catch (err) {
+      setMessage(err.response?.data?.message || err.message || 'Xóa ảnh thất bại');
+    } finally {
+      setAvatarUploading(false);
     }
   };
 
@@ -301,30 +346,41 @@ function ProfilePage() {
       setUploadMessage('Vui lòng chọn ít nhất một file để tải lên.');
       return;
     }
-
     setUploadMessage('Đang tải tài liệu...');
+    setUploadProgress(0);
 
     try {
-      const uploads = [];
       setUploadLoading(true);
+      const uploads = [];
+
+      const makeConfig = (label) => ({
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (ev) => {
+          if (ev && ev.total) {
+            const pct = Math.round((ev.loaded / ev.total) * 100);
+            setUploadProgress(pct);
+          }
+        }
+      });
+
       if (uploadDocs.cv) {
         const formData = new FormData();
         formData.append('file', uploadDocs.cv);
         formData.append('title', 'CV');
         formData.append('category', 'CV');
-        uploads.push(uploadProfileDocument(formData));
+        uploads.push(uploadProfileDocumentWithConfig(formData, makeConfig('CV')));
       }
       if (uploadDocs.internshipDoc) {
         const formData = new FormData();
         formData.append('file', uploadDocs.internshipDoc);
         formData.append('title', 'Hồ sơ thực tập');
         formData.append('category', 'HỒ SƠ');
-        uploads.push(uploadProfileDocument(formData));
+        uploads.push(uploadProfileDocumentWithConfig(formData, makeConfig('Hồ sơ')));
       }
 
       const results = await Promise.allSettled(uploads);
       const successCount = results.filter((item) => item.status === 'fulfilled' && item.value?.success).length;
-      const failedCount = results.filter((item) => item.status === 'rejected').length;
+      const failedCount = results.filter((item) => item.status === 'rejected' || (item.status === 'fulfilled' && !item.value?.success)).length;
 
       if (successCount > 0) {
         const profileRes = await getMyProfile();
@@ -356,6 +412,7 @@ function ProfilePage() {
       setUploadMessage(error.response?.data?.message || 'Tải tài liệu thất bại');
     } finally {
       setUploadLoading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -479,8 +536,19 @@ function ProfilePage() {
                     src={profile.profileImageUrl}
                     alt="avatar"
                     style={{ width: '100%', height: '100%', borderRadius: '12px', objectFit: 'cover' }}
-                    onError={() => {
+                    onError={async () => {
                       console.warn('Avatar image failed to load:', profile.profileImageUrl);
+                      // Try to fetch a presigned URL from backend (uses apiClient so token is included)
+                      try {
+                        const json = await presignProfileImage();
+                        const nextUrl = json?.data?.url || json?.url || null;
+                        if (nextUrl) {
+                          setProfile((p) => ({ ...(p || {}), profileImageUrl: nextUrl }));
+                          return;
+                        }
+                      } catch (err) {
+                        console.warn('presignProfileImage failed', err?.message || err);
+                      }
                       setAvatarLoadError(true);
                     }}
                   />
@@ -490,10 +558,25 @@ function ProfilePage() {
               </div>
             </div>
             <div className="avatar-action">
-              <button className="btn outline small avatar-change-btn" type="button" onClick={handleAvatarClick} disabled={avatarUploading}>
-                {avatarUploading ? 'Đang tải...' : 'Đổi ảnh'}
-              </button>
-              <input ref={avatarInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
+                {avatarPreviewUrl ? (
+                  <div className="avatar-preview-actions">
+                    <img src={avatarPreviewUrl} alt="preview" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8, marginRight: 8 }} />
+                    <div>
+                      <button className="btn" type="button" onClick={confirmUploadAvatar} disabled={avatarUploading}>{avatarUploading ? 'Đang tải...' : 'Xác nhận'}</button>
+                      <button className="btn outline" type="button" onClick={cancelAvatarSelection} disabled={avatarUploading}>Hủy</button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <button className="btn outline small avatar-change-btn" type="button" onClick={handleAvatarClick} disabled={avatarUploading}>
+                      {avatarUploading ? 'Đang tải...' : 'Đổi ảnh'}
+                    </button>
+                    <button className="btn outline small" type="button" onClick={handleDeleteAvatar} disabled={avatarUploading || !profile?.profileImageUrl}>
+                      Xóa ảnh
+                    </button>
+                    <input ref={avatarInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarSelect} />
+                  </>
+                )}
             </div>
           </div>
           <div className="profile-meta">
@@ -553,7 +636,7 @@ function ProfilePage() {
 
       <div className="profile-layout">
         <div className="profile-main-column">
-          {activeTab === 'overview' ? (
+          {activeTab === 'overview' && (
             <>
               <section className="card profile-section">
                 <div className="card-header">
@@ -703,7 +786,9 @@ function ProfilePage() {
                 </div>
               </section>
             </>
-          ) : activeTab === 'skills' ? (
+          )}
+
+          {activeTab === 'skills' && (
             <>
               <section className="card profile-section">
                 <div className="card-header">
@@ -764,7 +849,9 @@ function ProfilePage() {
                 </div>
               </section>
             </>
-          ) : (
+          )}
+
+          {activeTab === 'documents' && (
             <>
               <section className="card profile-section">
                 <div className="card-header">
@@ -835,6 +922,14 @@ function ProfilePage() {
                       {uploadLoading ? 'Đang tải...' : 'Gửi tài liệu'}
                     </button>
                   </div>
+                  {uploadLoading && uploadProgress > 0 && (
+                    <div className="upload-progress">
+                      <div className="progress-track">
+                        <div className="progress-fill" style={{ width: `${uploadProgress}%` }} />
+                      </div>
+                      <small>{uploadProgress}%</small>
+                    </div>
+                  )}
                   {uploadMessage && <p className="form-message success">{uploadMessage}</p>}
                 </form>
               </section>
@@ -866,6 +961,65 @@ function ProfilePage() {
                     ))}
                   </div>
                 )}
+              </section>
+            </>
+          )}
+
+          {activeTab === 'security' && (
+            <>
+              <section className="card profile-section">
+                <div className="card-header">
+                  <div>
+                    <h3>Cài đặt bảo mật</h3>
+                    <p>Đổi mật khẩu hoặc khôi phục mật khẩu.</p>
+                  </div>
+                </div>
+                <div className="profile-info-stack">
+                  <div className="account-toggle">
+                    <button className={accountMode === 'change' ? 'active' : ''} type="button" onClick={() => setAccountMode('change')}>Đổi mật khẩu</button>
+                    <button className={accountMode === 'forgot' ? 'active' : ''} type="button" onClick={() => setAccountMode('forgot')}>Quên mật khẩu</button>
+                  </div>
+
+                  {accountMode === 'change' ? (
+                    <form className="account-form" onSubmit={handleChangePassword}>
+                      <label className="profile-field">
+                        <span>Mật khẩu cũ</span>
+                        <input type="password" name="oldPassword" value={passwordForm.oldPassword} onChange={handlePasswordChange} />
+                      </label>
+                      <label className="profile-field">
+                        <span>Mật khẩu mới</span>
+                        <input type="password" name="newPassword" value={passwordForm.newPassword} onChange={handlePasswordChange} />
+                      </label>
+                      <label className="profile-field">
+                        <span>Xác nhận mật khẩu mới</span>
+                        <input type="password" name="confirmPassword" value={passwordForm.confirmPassword} onChange={handlePasswordChange} />
+                      </label>
+                      <div className="button-row">
+                        <button className="btn" type="submit">Đổi mật khẩu</button>
+                      </div>
+                    </form>
+                  ) : (
+                    <form className="account-form" onSubmit={handleForgotPassword}>
+                      <label className="profile-field">
+                        <span>Email</span>
+                        <input type="email" name="email" value={resetForm.email} onChange={handleResetChange} />
+                      </label>
+                      <label className="profile-field">
+                        <span>Mật khẩu mới</span>
+                        <input type="password" name="newPassword" value={resetForm.newPassword} onChange={handleResetChange} />
+                      </label>
+                      <label className="profile-field">
+                        <span>Xác nhận mật khẩu mới</span>
+                        <input type="password" name="confirmPassword" value={resetForm.confirmPassword} onChange={handleResetChange} />
+                      </label>
+                      <div className="button-row">
+                        <button className="btn" type="submit">Đặt lại mật khẩu</button>
+                      </div>
+                    </form>
+                  )}
+
+                  {passwordMessage && <p className="form-message success">{passwordMessage}</p>}
+                </div>
               </section>
             </>
           )}

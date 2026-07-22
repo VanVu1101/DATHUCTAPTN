@@ -68,7 +68,10 @@ function StudentManagementPage() {
         getMentors(),
       ]);
 
-      setStudents(Array.isArray(studentsRes) ? studentsRes : studentsRes.data || []);
+      const normalizedStudents = Array.isArray(studentsRes)
+        ? studentsRes
+        : (studentsRes?.data || studentsRes || []);
+      setStudents(Array.isArray(normalizedStudents) ? normalizedStudents : []);
       setPeriods(Array.isArray(periodsRes) ? periodsRes : periodsRes.data || []);
       setMentors(mentorItems);
     } catch (error) {
@@ -128,19 +131,36 @@ function StudentManagementPage() {
         status: form.status
       };
 
+      let createdOrUpdatedStudent = null;
+
       if (editingStudent) {
-        await updateStudent(editingStudent.id, payload);
+        const res = await updateStudent(editingStudent.id, payload);
+        createdOrUpdatedStudent = res?.data || res;
         if (form.mentorId) {
           await assignStudentMentor(editingStudent.id, Number(form.mentorId));
         }
         setMessage('Đã cập nhật sinh viên.');
       } else {
-        await createStudent(payload);
+        const res = await createStudent(payload);
+        createdOrUpdatedStudent = res?.data || res;
         setMessage('Đã tạo sinh viên mới.');
       }
 
+      if (createdOrUpdatedStudent?.id) {
+        setStudents((current) => {
+          const existing = current.find((student) => Number(student.id) === Number(createdOrUpdatedStudent.id));
+          if (existing) {
+            return current.map((student) => Number(student.id) === Number(createdOrUpdatedStudent.id) ? { ...student, ...createdOrUpdatedStudent } : student);
+          }
+          return [
+            { ...createdOrUpdatedStudent, fullName: createdOrUpdatedStudent.fullName || form.fullName || 'Sinh viên mới' },
+            ...current
+          ];
+        });
+      }
+
       closeForm();
-      loadData();
+      await loadData();
     } catch (error) {
       setMessage(error.response?.data?.message || 'Lỗi khi lưu sinh viên.');
     }

@@ -52,6 +52,11 @@ export const uploadProfileDocument = async (formData) => {
   return res.data;
 };
 
+export const uploadProfileDocumentWithConfig = async (formData, config = {}) => {
+  const res = await apiClient.post('/students/profile/documents', formData, config);
+  return res.data;
+};
+
 export const deleteProfileDocument = async (documentId) => {
   const res = await apiClient.delete(`/students/profile/documents/${documentId}`);
   return res.data;
@@ -59,6 +64,16 @@ export const deleteProfileDocument = async (documentId) => {
 
 export const uploadProfileImage = async (formData) => {
   const res = await apiClient.post('/students/profile/image', formData);
+  return res.data;
+};
+
+export const deleteProfileImage = async () => {
+  const res = await apiClient.delete('/students/profile/image');
+  return res.data;
+};
+
+export const presignProfileImage = async () => {
+  const res = await apiClient.get('/students/profile/image-presign');
   return res.data;
 };
 

@@ -2,6 +2,7 @@ const reportService = require('../services/report');
 const Mentor = require('../models/mentor');
 const Student = require('../models/student');
 const ReportModel = require('../models/report');
+const WeeklyReport = require('../models/weeklyReport');
 const User = require('../models/user');
 const notificationService = require('../services/notification');
 const { uploadFile } = require('../config/s3');
@@ -21,7 +22,29 @@ const submitReport = async (req, res) => {
     try {
         const payload = { ...req.body };
         payload.userId = req.user.id;
+        // If submission references a weekly template, enforce deadline
+        if (payload.weeklyReportId) {
+            const w = await WeeklyReport.findByPk(payload.weeklyReportId).catch(() => null);
+            if (w && w.dueDate) {
+                const now = new Date();
+                const due = new Date(w.dueDate);
+                if (now > due) {
+                    return res.status(400).json({ success: false, message: 'Hạn nộp đã qua. Không thể nộp báo cáo.' });
+                }
+            }
+        }
+
         if (req.file) {
+            // Double-check file mime and size server-side (extra safety)
+            const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+            const maxBytes = 5 * 1024 * 1024;
+            if (!allowed.includes(req.file.mimetype)) {
+                return res.status(400).json({ success: false, message: 'Định dạng tệp không được hỗ trợ. Vui lòng tải lên PDF/DOC/DOCX.' });
+            }
+            if (req.file.size && req.file.size > maxBytes) {
+                return res.status(400).json({ success: false, message: 'Kích thước tệp vượt quá giới hạn 5MB.' });
+            }
+
             const student = await Student.findOne({ where: { userId: req.user.id } });
             const folder = `reports/${student?.id || req.user.id}`;
             const url = await uploadFile({

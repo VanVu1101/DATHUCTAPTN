@@ -168,7 +168,9 @@ const getFileUrl = async (key, expiresIn = signedUrlExpiresIn) => {
     if (!key) return null;
     if (useLocal) return buildFileUrl(`${backendHost}/uploads/${key.replace(/\\/g, '/')}`);
     const activeRegion = resolvedRegion || region;
-    if (publicRead) return buildFileUrl(`https://${bucket}.s3.${activeRegion}.amazonaws.com/${key}`);
+
+    // Prefer generating a presigned URL for private access. If signed URL generation fails,
+    // fall back to the public S3 URL (may be AccessDenied if bucket/object is not public).
     try {
         return await getSignedUrl(
             s3Client,
@@ -180,7 +182,9 @@ const getFileUrl = async (key, expiresIn = signedUrlExpiresIn) => {
             console.warn('S3 signed URL retrieval failed due to time skew; falling back to public URL.', error?.message || error);
             return buildFileUrl(`https://${bucket}.s3.${activeRegion}.amazonaws.com/${key}`);
         }
-        throw error;
+        // If signing fails for other reasons, log and still return the public URL as a last resort.
+        console.warn('Failed to generate signed URL for S3 object, returning public URL as fallback:', error?.message || error);
+        return buildFileUrl(`https://${bucket}.s3.${activeRegion}.amazonaws.com/${key}`);
     }
 };
 

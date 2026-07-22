@@ -94,6 +94,26 @@ const uploadProfileImage = async (req, res) => {
     }
 };
 
+const deleteProfileImage = async (req, res) => {
+    try {
+        const profile = await studentService.deleteProfileImage(req.user.id);
+        res.status(200).json({ success: true, message: 'Đã xóa ảnh đại diện', data: profile });
+    } catch (error) {
+        console.error('deleteProfileImage error:', error && error.stack ? error.stack : error);
+        res.status(500).json({ success: false, message: error.message || 'Lỗi xóa ảnh đại diện' });
+    }
+};
+
+const presignProfileImage = async (req, res) => {
+    try {
+        const url = await studentService.presignProfileImage(req.user.id);
+        res.status(200).json({ success: true, data: { url } });
+    } catch (error) {
+        console.error('presignProfileImage error:', error && error.stack ? error.stack : error);
+        res.status(500).json({ success: false, message: error.message || 'Lỗi tạo presigned URL' });
+    }
+};
+
 const getStudentById = async (req, res) => {
     try {
         const student = await studentService.getStudentById(req.params.id);
@@ -211,6 +231,8 @@ module.exports = {
     uploadProfileDocument,
     deleteProfileDocument,
     uploadProfileImage,
+    deleteProfileImage,
+    presignProfileImage,
     getStudentById,
     createStudent,
     updateStudent,

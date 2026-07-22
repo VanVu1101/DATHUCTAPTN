@@ -88,6 +88,23 @@ const resolveProfileImageUrls = async (student, user) => {
     ]);
 };
 
+const presignProfileImage = async (userId, expiresIn = signedUrlExpiresIn) => {
+    const user = await User.findByPk(userId, { attributes: ['id', 'profileImageUrl'] });
+    let student = await Student.findOne({ where: { userId } });
+    if (!student && user) {
+        // no student yet, try using user.profileImageUrl
+        const key = extractStorageKeyFromUrl(user.profileImageUrl || '');
+        if (!key) throw new Error('No profile image available to presign');
+        return await getFileUrl(key, expiresIn);
+    }
+    if (!student) student = await ensureStudentProfile(userId);
+
+    const raw = student.profileImageUrl || user?.profileImageUrl || '';
+    const key = extractStorageKeyFromUrl(raw);
+    if (!key) throw new Error('No profile image available to presign');
+    return await getFileUrl(key, expiresIn);
+};
+
 const buildProfilePayload = (student, user, options = {}) => {
     const profileImageUrlCandidates = [student?.profileImageUrl, user?.profileImageUrl].filter(Boolean);
     const profileImageUrl = profileImageUrlCandidates.find((value) => String(value).startsWith('http')) || profileImageUrlCandidates[0] || '';
@@ -537,6 +554,25 @@ const saveProfileImageKey = async (userId, key) => {
     return getMyProfile(userId);
 };
 
+const deleteProfileImage = async (userId) => {
+    const student = await ensureStudentProfile(userId);
+    const user = await User.findByPk(userId, { attributes: ['id', 'email', 'profileImageUrl'] });
+
+    const key = extractStorageKeyFromUrl(student.profileImageUrl || user?.profileImageUrl || '');
+    if (key) {
+        try {
+            await deleteFile(key);
+        } catch (err) {
+            console.warn('deleteProfileImage: deleteFile failed', err?.message || err);
+        }
+    }
+
+    await student.update({ profileImageUrl: null });
+    if (user) await user.update({ profileImageUrl: null });
+
+    return getMyProfile(userId);
+};
+
 const getStudents = async (filters = {}) => {
     const where = {};
 
@@ -764,9 +800,12 @@ module.exports = {
     uploadProfileDocument,
     deleteProfileDocument,
     uploadProfileImage,
+    presignProfileImage,
     getStudentById,
     createStudent,
     updateStudent,
     assignMentor,
     deleteStudent
 };
+// export deleteProfileImage so controllers can use it
+module.exports.deleteProfileImage = deleteProfileImage;
