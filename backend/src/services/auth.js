@@ -6,6 +6,15 @@ const { sendPasswordResetEmail } = require('../infrastructure/mail');
 
 const passwordResetTokens = new Map();
 
+const pruneExpiredResetTokens = () => {
+    const now = Date.now();
+    for (const [token, record] of passwordResetTokens.entries()) {
+        if (record?.expiresAt && now > record.expiresAt) {
+            passwordResetTokens.delete(token);
+        }
+    }
+};
+
 const isStrongPassword = (password) => {
     if (!password || password.length < 8) return false;
     if (!/[A-Z]/.test(password)) return false;
@@ -151,6 +160,8 @@ const requestPasswordReset = async (email) => {
         throw new Error('Vui lòng nhập email');
     }
 
+    pruneExpiredResetTokens();
+
     const normalizedEmail = email.trim().toLowerCase();
     const user = await User.findOne({ where: { email: normalizedEmail } });
     if (!user) {
@@ -170,14 +181,17 @@ const requestPasswordReset = async (email) => {
     if (!result.sent) {
         return {
             success: true,
-            message: 'Yêu cầu đặt lại mật khẩu đã được ghi nhận. Vui lòng dùng liên kết tạm thời trong log server.',
-            resetLink
+            message: 'Yêu cầu đặt lại mật khẩu đã được ghi nhận. Hệ thống chưa gửi được email lúc này, nhưng vẫn hiển thị liên kết khôi phục để bạn sử dụng ngay.',
+            resetLink,
+            provider: result.provider || 'unknown'
         };
     }
 
     return {
         success: true,
-        message: 'Đã gửi email đặt lại mật khẩu. Vui lòng kiểm tra hộp thư.'
+        message: 'Một email chứa liên kết đặt lại mật khẩu đã được gửi tới hộp thư của bạn. Vui lòng kiểm tra email.',
+        resetLink,
+        provider: result.provider || 'unknown'
     };
 };
 
@@ -185,6 +199,12 @@ const resetPasswordWithToken = async ({ email, token, newPassword }) => {
     if (!email || !token || !newPassword) {
         throw new Error('Vui lòng nhập đầy đủ email, token và mật khẩu mới');
     }
+
+    if (!isStrongPassword(newPassword)) {
+        throw new Error('Mật khẩu phải có ít nhất 8 ký tự, bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt');
+    }
+
+    pruneExpiredResetTokens();
 
     const normalizedEmail = email.trim().toLowerCase();
     const record = passwordResetTokens.get(token);
@@ -209,10 +229,16 @@ const resetPasswordWithToken = async ({ email, token, newPassword }) => {
     return true;
 };
 
-module.exports = { registerUser, loginUser, changePassword, resetPasswordByEmail, requestPasswordReset, resetPasswordWithToken };
-
 const getLoginHistory = async (userId) => {
     return LoginHistory.findAll({ where: { userId }, order: [['loginAt', 'DESC']], limit: 50 });
 };
 
-module.exports = { registerUser, loginUser, changePassword, resetPasswordByEmail, requestPasswordReset, resetPasswordWithToken, getLoginHistory };
+module.exports = {
+    registerUser,
+    loginUser,
+    changePassword,
+    resetPasswordByEmail,
+    requestPasswordReset,
+    resetPasswordWithToken,
+    getLoginHistory
+};

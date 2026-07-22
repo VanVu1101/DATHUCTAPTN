@@ -55,7 +55,11 @@ const uploadProfileDocument = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Vui lòng chọn file để upload' });
         }
         const document = await studentService.uploadProfileDocument(req.user.id, req.body, req.file);
-        res.status(201).json({ success: true, message: 'Đã upload tài liệu hồ sơ', data: document });
+        res.status(201).json({
+            success: true,
+            message: 'Đã upload tài liệu hồ sơ và gửi thông báo xác nhận qua email',
+            data: document
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

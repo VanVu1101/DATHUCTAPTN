@@ -189,6 +189,12 @@ const getCompanyStudents = async (actor, query = {}) => {
     if (companyNames.length) companyClause[Op.or].push({ enterpriseName: { [Op.in]: companyNames } });
     if (mentorIds.length) companyClause[Op.or].push({ mentorId: { [Op.in]: mentorIds } });
 
+    const isUnassignedLookup = String(query.assignedStatus || '').toLowerCase() === 'unassigned';
+    if (isUnassignedLookup) {
+        companyClause[Op.or].push({ enterpriseName: null });
+        companyClause[Op.or].push({ enterpriseName: '' });
+    }
+
     if (!companyClause[Op.or].length) return [];
 
     if (Object.keys(baseFilter).length) {

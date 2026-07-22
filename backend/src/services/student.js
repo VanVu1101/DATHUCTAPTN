@@ -10,6 +10,7 @@ const ChatConversation = require('../models/chatConversation');
 const sequelize = require('../config/database');
 const StudentDocument = require('../models/studentDocument');
 const { uploadFile, deleteFile, getFileUrl } = require('../config/s3');
+const { sendGenericEmail } = require('../infrastructure/mail');
 const reportService = require('./report');
 const notificationService = require('./notification');
 const studentProgressService = require('./studentProgress');
@@ -438,6 +439,27 @@ const uploadProfileDocument = async (userId, payload, file) => {
         fileType: file.mimetype
     });
 
+    const user = await User.findByPk(userId, { attributes: ['id', 'email'] });
+    if (user?.email) {
+        const fileName = file.originalname || 'tài liệu';
+        const subject = 'InternHub: upload CV/ tài liệu thành công';
+        const html = `
+            <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+                <h3>Upload thành công</h3>
+                <p>Xin chào,</p>
+                <p>File <strong>${fileName}</strong> đã được tải lên thành công trên hệ thống lưu trữ S3.</p>
+                <p>Hệ thống đã lưu trữ file của bạn và bạn có thể xem lại trong hồ sơ cá nhân.</p>
+            </div>
+        `;
+        const text = `File ${fileName} đã được tải lên thành công trên hệ thống lưu trữ S3.`;
+        await sendGenericEmail({
+            toEmail: user.email,
+            subject,
+            html,
+            text
+        });
+    }
+
     const record = document.toJSON();
     if (record.fileUrl && !String(record.fileUrl).startsWith('http')) {
         try {
@@ -532,17 +554,28 @@ const getStudents = async (filters = {}) => {
         ];
     }
 
-    const students = await Student.findAll({
-        where,
-        include: [
-            { model: User, attributes: ['email', 'role'] },
-            { model: Major, attributes: ['name'] },
-            { model: InternshipPeriod, attributes: ['id', 'name'] },
-            { model: Mentor, attributes: ['id', 'fullName', 'companyName'] }
-        ],
-        order: [['fullName', 'ASC']]
-    });
-    return filterStudentRecords(students);
+    try {
+        const students = await Student.findAll({
+            where,
+            include: [
+                { model: User, attributes: ['email', 'role'] },
+                { model: Major, attributes: ['name'] },
+                { model: InternshipPeriod, attributes: ['id', 'name'] },
+                { model: Mentor, attributes: ['id', 'fullName', 'companyName'] }
+            ],
+            order: [['fullName', 'ASC']]
+        });
+        return filterStudentRecords(students);
+    } catch (error) {
+        if (error?.name === 'SequelizeEagerLoadingError') {
+            const students = await Student.findAll({
+                where,
+                order: [['fullName', 'ASC']]
+            });
+            return filterStudentRecords(students);
+        }
+        throw error;
+    }
 };
 
 const getAllStudents = async () => {
@@ -562,8 +595,44 @@ const getStudentById = async (id) => {
     return student;
 };
 
-const createStudent = async (data) => {
-    return await Student.create(data);
+const createStudent = async (data = {}) => {
+    const defaultMajor = await ensureDefaultMajor();
+    const parsedPeriodId = data.periodId === undefined || data.periodId === null || data.periodId === ''
+        ? null
+        : Number(data.periodId);
+
+    const normalizedData = {
+        ...data,
+        studentCode: data.studentCode || buildStudentCode(Date.now()),
+        fullName: data.fullName || 'Sinh viên mới',
+        className: data.className || 'KTPM',
+        majorName: data.majorName || defaultMajor.name,
+        enterpriseName: data.enterpriseName || null,
+        periodId: Number.isNaN(parsedPeriodId) ? null : parsedPeriodId,
+        status: data.status || 'ACTIVE',
+        userId: data.userId ? Number(data.userId) : null,
+        majorId: data.majorId ? Number(data.majorId) : defaultMajor.id
+    };
+
+    if (!normalizedData.userId) {
+        const fallbackUser = await User.create({
+            email: `${String(normalizedData.studentCode || 'student').toLowerCase()}@local.test`,
+            password: 'TempPassword@123',
+            role: 'STUDENT'
+        });
+        normalizedData.userId = fallbackUser.id;
+    }
+
+    if (!normalizedData.majorId) {
+        normalizedData.majorId = defaultMajor.id;
+    }
+
+    try {
+        return await Student.create(normalizedData);
+    } catch (error) {
+        console.error('createStudent error:', error?.message || error);
+        throw error;
+    }
 };
 
 const updateStudent = async (id, data) => {

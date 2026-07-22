@@ -2,9 +2,11 @@ const reportService = require('../services/report');
 const Mentor = require('../models/mentor');
 const Student = require('../models/student');
 const ReportModel = require('../models/report');
+const User = require('../models/user');
 const notificationService = require('../services/notification');
 const { uploadFile } = require('../config/s3');
 const { notifyTaskAssigned, notifyDeadlineSoon } = require('../services/automation');
+const { sendReportSubmissionEmail } = require('../infrastructure/mail');
 
 const mentorOwnsStudent = async (userId, studentId) => {
     const mentor = await Mentor.findOne({ where: { userId } });
@@ -46,12 +48,22 @@ const submitReport = async (req, res) => {
                                 type: 'REPORT_SUBMIT',
                                 data: { reportId: report.id }
                             });
+
+                            const mentorUser = await User.findByPk(mentor.userId);
+                            if (mentorUser?.email) {
+                                await sendReportSubmissionEmail(mentorUser.email, {
+                                    recipientName: mentor.fullName || mentorUser.email,
+                                    studentName: student.fullName || 'Sinh viên',
+                                    weekNumber: report.weekNumber,
+                                    reportLink: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reports`
+                                });
+                            }
                         }
                     }
                 } catch (nErr) {
                     console.error('Notification error:', nErr.message || nErr);
                 }
-        res.status(201).json({ success: true, data: report });
+        res.status(201).json({ success: true, message: 'Báo cáo đã được nộp thành công. Mentor sẽ nhận thông báo.', data: report });
     } catch (error) {
         res.status(400).json({ success: false, message: error.message });
     }
